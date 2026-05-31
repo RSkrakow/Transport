@@ -95,7 +95,7 @@ export default function FmsPage() {
         driver_name: name,
         total_km: Math.round(s.km),
         avg_l100km: s.km > 0 ? Math.round((s.fuel / s.km) * 100 * 100) / 100 : 0,
-        idle_pct: s.total > 0 ? Math.round((s.idle / (s.fuel + s.idle)) * 100 * 10) / 10 : 0,
+        idle_pct: (s.fuel + s.idle) > 0 ? Math.round((s.idle / (s.fuel + s.idle)) * 100 * 10) / 10 : 0,
         vehicles: s.vehs.size,
       }));
 
