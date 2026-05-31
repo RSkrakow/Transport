@@ -150,6 +150,19 @@ export default function ImportPanel() {
 }
 
 // ─── Vehicle importer ─────────────────────────────────────────
+interface VehicleRow {
+  reg: string;
+  brand: string | null;
+  model: string | null;
+  vehicle_type: string;
+  year_produced: number | null;
+  odometer_km: number | null;
+  avg_fuel_l100: number | null;
+  leasing_eur_mo: number | null;
+  is_active: boolean;
+  _idx: number;
+}
+
 async function importVehicles(
   rows: Record<string, unknown>[],
   _filename: string
@@ -158,8 +171,8 @@ async function importVehicles(
   let skipped = 0;
   const errors: string[] = [];
 
-  const validRows = rows
-    .map((row, i) => {
+  const validRows: VehicleRow[] = rows
+    .map((row, i): VehicleRow | null => {
       // Try to find reg column flexibly
       const reg = String(
         row["Rejestracja"] ?? row["Nr rejestracyjny"] ?? row["reg"] ?? ""
@@ -180,7 +193,7 @@ async function importVehicles(
         _idx: i,
       };
     })
-    .filter(Boolean) as NonNullable<ReturnType<typeof validRows[0]>>[];
+    .filter((r): r is VehicleRow => r !== null);
 
   // Upsert in batches of 50
   for (let i = 0; i < validRows.length; i += 50) {
@@ -191,17 +204,4 @@ async function importVehicles(
 
     if (error) {
       errors.push(`Batch ${i / 50 + 1}: ${error.message}`);
-      skipped += batch.length;
-    } else {
-      imported += batch.length;
-    }
-  }
-
-  return { imported, skipped, errors };
-}
-
-function numOrNull(v: unknown): number | null {
-  if (v === null || v === undefined || v === "") return null;
-  const n = Number(v);
-  return isNaN(n) ? null : n;
-}
+      s
