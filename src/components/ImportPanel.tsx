@@ -237,7 +237,8 @@ async function upsertBatches<T extends Record<string, unknown>>(
 
   for (let i = 0; i < rows.length; i += 50) {
     const batch = rows.slice(i, i + 50);
-    const { error } = await supabase.from(table).upsert(batch, { onConflict: conflictCol });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error } = await supabase.from(table).upsert(batch as any[], { onConflict: conflictCol });
     if (error) {
       errors.push(`Batch ${Math.floor(i / 50) + 1}: ${error.message}`);
       skipped += batch.length;
