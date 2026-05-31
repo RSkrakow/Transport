@@ -204,4 +204,17 @@ async function importVehicles(
 
     if (error) {
       errors.push(`Batch ${i / 50 + 1}: ${error.message}`);
-      s
+      skipped += batch.length;
+    } else {
+      imported += batch.length;
+    }
+  }
+
+  return { imported, skipped, errors };
+}
+
+function numOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  return isNaN(n) ? null : n;
+}
