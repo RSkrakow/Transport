@@ -102,7 +102,7 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     ? transitCountries
     : [originCountry, destCountry];
 
-  const uniqueCountries = [...new Set(countries)];
+  const uniqueCountries = Array.from(new Set(countries));
   const tollRates = uniqueCountries.map(c => TOLL_MATRIX[c] ?? 8.0);
   const avgToll   = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
   const tollCost  = (avgToll / 100) * distanceKm;
