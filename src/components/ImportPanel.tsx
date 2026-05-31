@@ -273,18 +273,32 @@ async function importVehicles(
   const validRows: VehicleRow[] = rows
     .map((row, i): VehicleRow | null => {
       const reg = String(
-        row["Rejestracja"] ?? row["Nr rejestracyjny"] ?? row["reg"] ?? ""
+        row["Nr rej."] ?? row["Rejestracja"] ?? row["Nr rejestracyjny"] ?? row["reg"] ?? ""
       ).trim().toUpperCase().replace(/\s+/g, "");
 
       if (!reg) { skipped++; return null; }
+
+      // Determine vehicle type from Grupa column
+      const grupa = String(row["Grupa"] ?? "").toLowerCase();
+      const vehicleType = grupa.includes("naczepa") || grupa.includes("nacz")
+        ? "naczepa"
+        : grupa.includes("sam") ? "samochód dostawczy" : "ciągnik";
+
+      // Year from "Data pierw. rejestr." (Excel serial) or "Rok"
+      let yearProduced = numOrNull(row["Rok"] ?? row["year_produced"]);
+      if (!yearProduced) {
+        const regDateRaw = row["Data pierw. rejestr."] ?? row["Data rejestracji"];
+        const regDate = dateOrNull(regDateRaw);
+        if (regDate) yearProduced = parseInt(regDate.slice(0, 4));
+      }
 
       return {
         reg,
         brand: strOrNull(row["Marka"] ?? row["brand"]),
         model: strOrNull(row["Model"] ?? row["model"]),
-        vehicle_type: "ciągnik",
-        year_produced: numOrNull(row["Rok"] ?? row["year_produced"]),
-        odometer_km: numOrNull(row["Licznik"] ?? row["Przebieg"] ?? row["odometer_km"]),
+        vehicle_type: vehicleType,
+        year_produced: yearProduced,
+        odometer_km: numOrNull(row["Stan licznika"] ?? row["Licznik"] ?? row["Przebieg"] ?? row["odometer_km"]),
         avg_fuel_l100: numOrNull(row["Spalanie"] ?? row["avg_fuel_l100"]),
         leasing_eur_mo: numOrNull(row["Leasing EUR"] ?? row["leasing_eur_mo"]),
         is_active: true,
