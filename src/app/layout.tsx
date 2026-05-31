@@ -48,6 +48,12 @@ export default function RootLayout({
                   Flota
                 </Link>
                 <Link
+                  href="/fms"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  FMS
+                </Link>
+                <Link
                   href="/import"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >

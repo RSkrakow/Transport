@@ -37,14 +37,14 @@ export interface CostBreakdown {
 
 // ─── Fleet constants (from our data analysis) ────────────────
 export const FLEET = {
-  avgFuelL100:       29.62,   // Trimble FMS, 67 tractors
+  avgFuelL100:       27.80,   // Trimble FMS, 55 vehicles, Jan-May 2026 (was 29.62 from 2024-2025)
   driverCostPerKm:   0.643,   // 3,328,285 EUR / 5,180,419 km
   serviceCostNewKm:  0.009,   // MAN TGX 2023-2024
   serviceCostOldKm:  0.020,   // MAN TGX 2018-2019, DAF XF 2019
   leasingNewEurMo:   733.33,  // ~8,800 EUR/yr
   leasingOldEurMo:   520.83,  // ~6,250 EUR/yr
   avgKmPerMonth:     11_667,  // 140k km/yr
-  idleFuelPct:       0.0922,  // 9.22% of fuel cost = idle losses
+  idleFuelPct:       0.021,   // 2.1% idle losses (Trimble FMS Jan-May 2026; was 9.22% from wydatki.xls)
   adblueRatePct:     0.035,   // AdBlue = 3.5% of diesel volume
 } as const;
 

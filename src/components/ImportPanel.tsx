@@ -9,7 +9,8 @@ type ImportType =
   | "kartoteka_pojazdow"
   | "kartoteka_kierowcow"
   | "faktury"
-  | "rejestr_transportow";
+  | "rejestr_transportow"
+  | "trimble_fms";
 
 interface ImportResult {
   imported: number;
@@ -73,6 +74,16 @@ export default function ImportPanel() {
             file.name
           );
           break;
+        case "trimble_fms":
+          // Trimble report: row 0 = filter info, row 1 = empty, row 2 = headers, row 3+ = data
+          res = await importTrimble(
+            XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+              defval: null,
+              range: 2, // row index 2 = actual headers
+            }),
+            file.name
+          );
+          break;
         default:
           res = { imported: 0, skipped: 0, errors: ["Nieznany typ importu"] };
       }
@@ -118,6 +129,7 @@ export default function ImportPanel() {
             <option value="kartoteka_kierowcow">Kartoteka kierowców</option>
             <option value="faktury">Faktury wystawione (przychody)</option>
             <option value="rejestr_transportow">Rejestr transportów (zlecenia)</option>
+            <option value="trimble_fms">Zużycie paliwa FMS (Trimble)</option>
           </select>
         </div>
 
@@ -178,6 +190,7 @@ export default function ImportPanel() {
           <li><strong>Kierowcy:</strong> Nazwisko, Imię, Samochód, Nr rej. Naczepy, Data zatrudnienia, Kraj</li>
           <li><strong>Faktury przychodowe:</strong> Status płatności, Numer, Data, Kontrahent, Netto PLN, Brutto PLN, Transport</li>
           <li><strong>Rejestr transportów:</strong> Stan, Nr pełny, Ciągnik, Naczepa, Kierowca, Fracht, Zał./Roz. kraj, Km, Marża</li>
+          <li><strong>Zużycie paliwa FMS:</strong> Raport Trimble — Pojazd, Kierowca, Data, Jazda l/100km, Bieg jałowy, PTO, Całkowity</li>
         </ul>
       </div>
     </div>
@@ -576,6 +589,96 @@ async function importRejestr(
     "route_history",
     validRows as unknown as Record<string, unknown>[],
     "order_number"
+  );
+  return { ...res, skipped: res.skipped + skipped };
+}
+
+// ─── Trimble FMS fuel consumption importer ────────────────────
+// Expected headers (row index 2 in xlsx):
+// Pojazd, Kierowca, Rok, Miesiąc, Tydzień, Data,
+// Prowadzenie Pojazdu / Jazda - Zużycie (l), ... Odległość (km), ... Zuzycie calk. (l/100km),
+// Bieg jalowy - Zużycie (l), ... czas trwania (hm), ... Zuzycie calk. (l/h),
+// Czas postoju z PTO - Zużycie (l), ... czas trwania (hm), ... Zuzycie calk. (l/h),
+// Całkowity - Zużycie (l), ... czas trwania (hm), ... Zuzycie calk. (l/100km)
+
+interface FuelRow {
+  vehicle_reg: string;
+  driver_name: string | null;
+  year: number | null;
+  month: number | null;
+  week: number | null;
+  report_date: string | null;
+  drive_fuel_l: number | null;
+  drive_km: number | null;
+  drive_l100km: number | null;
+  idle_fuel_l: number | null;
+  idle_time_hm: string | null;
+  idle_l_per_h: number | null;
+  pto_fuel_l: number | null;
+  pto_time_hm: string | null;
+  pto_l_per_h: number | null;
+  total_fuel_l: number | null;
+  total_time_hm: string | null;
+  total_l100km: number | null;
+}
+
+async function importTrimble(
+  rows: Record<string, unknown>[],
+  _filename: string
+): Promise<ImportResult> {
+  let skipped = 0;
+
+  const validRows: FuelRow[] = rows
+    .map((row): FuelRow | null => {
+      const rawVeh = strOrNull(row["Pojazd"]);
+      if (!rawVeh) { skipped++; return null; }
+      // Strip suffix like _T4U, _T3U
+      const vehicleReg = rawVeh.split("_")[0].trim().toUpperCase();
+
+      return {
+        vehicle_reg: vehicleReg,
+        driver_name: strOrNull(row["Kierowca"]),
+        year: numOrNull(row["Rok"]),
+        month: numOrNull(row["Miesiąc"] ?? row["Miesiac"]),
+        week: numOrNull(row["Tydzień"] ?? row["Tydzien"]),
+        report_date: dateOrNull(row["Data"]),
+        drive_fuel_l: numOrNull(row["Prowadzenie Pojazdu / Jazda - Zużycie (l)"] ?? row["Prowadzenie Pojazdu / Jazda - Zuzycie (l)"]),
+        drive_km: numOrNull(row["Prowadzenie Pojazdu / Jazda - Odległość (km)"] ?? row["Prowadzenie Pojazdu / Jazda - Odleglosc (km)"]),
+        drive_l100km: numOrNull(row["Prowadzenie Pojazdu / Jazda - Zuzycie calk. (l/100km)"]),
+        idle_fuel_l: numOrNull(row["Bieg jalowy - Zużycie (l)"] ?? row["Bieg jalowy - Zuzycie (l)"]),
+        idle_time_hm: strOrNull(row["Bieg jalowy - czas trwania (hm)"]),
+        idle_l_per_h: numOrNull(row["Bieg jalowy - Zuzycie calk. (l/h)"]),
+        pto_fuel_l: numOrNull(row["Czas postoju z PTO - Zużycie (l)"] ?? row["Czas postoju z PTO - Zuzycie (l)"]),
+        pto_time_hm: strOrNull(row["Czas postoju z PTO - czas trwania (hm)"]),
+        pto_l_per_h: numOrNull(row["Czas postoju z PTO - Zuzycie calk. (l/h)"]),
+        total_fuel_l: numOrNull(row["Całkowity - Zużycie (l)"] ?? row["Calkowity - Zuzycie (l)"]),
+        total_time_hm: strOrNull(row["Całkowity - czas trwania (hm)"] ?? row["Calkowity - czas trwania (hm)"]),
+        total_l100km: numOrNull(row["Całkowity - Zuzycie calk. (l/100km)"] ?? row["Calkowity - Zuzycie calk. (l/100km)"]),
+      };
+    })
+    .filter((r): r is FuelRow => r !== null);
+
+  // After importing raw rows, also update avg_fuel_l100 per vehicle
+  const vehicleAgg: Record<string, { km: number; fuel: number }> = {};
+  for (const r of validRows) {
+    if (r.drive_km && r.drive_km > 0 && r.drive_fuel_l) {
+      if (!vehicleAgg[r.vehicle_reg]) vehicleAgg[r.vehicle_reg] = { km: 0, fuel: 0 };
+      vehicleAgg[r.vehicle_reg].km += r.drive_km;
+      vehicleAgg[r.vehicle_reg].fuel += r.drive_fuel_l;
+    }
+  }
+  // Update vehicles with computed avg
+  for (const [reg, agg] of Object.entries(vehicleAgg)) {
+    if (agg.km > 500) {
+      const l100 = Math.round((agg.fuel / agg.km) * 100 * 100) / 100;
+      await supabase.from("vehicles").update({ avg_fuel_l100: l100 }).eq("reg", reg);
+    }
+  }
+
+  const res = await upsertBatches(
+    "fuel_consumption",
+    validRows as unknown as Record<string, unknown>[],
+    "vehicle_reg,report_date,driver_name"
   );
   return { ...res, skipped: res.skipped + skipped };
 }
