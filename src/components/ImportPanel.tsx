@@ -307,7 +307,9 @@ async function importVehicles(
     })
     .filter((r): r is VehicleRow => r !== null);
 
-  const res = await upsertBatches("vehicles", validRows as unknown as Record<string, unknown>[], "reg");
+  // Strip internal _idx field before sending to DB
+  const dbRows = validRows.map(({ _idx: _discard, ...rest }) => rest);
+  const res = await upsertBatches("vehicles", dbRows as unknown as Record<string, unknown>[], "reg");
   return { ...res, skipped: res.skipped + skipped };
 }
 
