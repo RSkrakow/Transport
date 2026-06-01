@@ -87,7 +87,10 @@ export async function calculateRoute(
   apiKey: string
 ): Promise<RouteResult> {
   // /geojson suffix returns GeoJSON geometry (coordinates as [[lon,lat], ...])
-  const url = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson";
+  // Pass key both as header AND query param for maximum compatibility
+  const orsUrl = new URL("https://api.openrouteservice.org/v2/directions/driving-hgv/geojson");
+  if (apiKey) orsUrl.searchParams.set("api_key", apiKey);
+  const url = orsUrl.toString();
 
   const body = {
     coordinates: [
