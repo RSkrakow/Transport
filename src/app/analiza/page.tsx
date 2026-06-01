@@ -35,7 +35,8 @@ interface RouteRow {
   costPerKm: number;
   revenuePerKm: number;
   totalCost: number;
-  tollCost: number;       // EUR — myto (z macierzy lub ORS)
+  tollCost: number;       // EUR — myto (z TMS lub macierzy)
+  tollFromTms: boolean;   // true = rzeczywiste myto z TMS, false = macierz
   label: string;
   labelColor: string;
   euroClass: number;      // 3 | 4 | 5 | 6 — derived from vehicle year
@@ -166,8 +167,17 @@ export default function AnalizaPage() {
           const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
           const tmsMarzaPerKm = isNaN(tmsMarzaPerKmRaw) ? 0 : tmsMarzaPerKmRaw;
 
+          // Real toll from TMS (DKV/viaTOLL actual invoices)
+          // Column "Myto na trasie EUR" preferred, fallback to PLN→EUR conversion
+          const tmsTollEurRaw  = parseFloat(get(row, "myto na trasie eur") || "0");
+          const tmsTollPlnRaw  = parseFloat(get(row, "myto na trasie pln") || "0");
+          const tmsTollEur = tmsTollEurRaw > 0
+            ? tmsTollEurRaw
+            : tmsTollPlnRaw > 0
+            ? Math.round((tmsTollPlnRaw / eurRate) * 100) / 100
+            : 0;
+
           // Estimate fracht when TMS has no invoice yet (fracht=0)
-          // fracht_est = our_HBM_cost + TMS_margin_EUR (TMS margin = marza_per_km × km)
           let frachtEstimated = false;
           if (frachtEur === 0 && tmsMarzaPerKm > 0) {
             const breakdown0 = calculateRoute({
@@ -175,8 +185,8 @@ export default function AnalizaPage() {
               fuelPriceEurL: fuelPrice, freightEur: 1,
               transitCountries: [originCountry, destCountry],
               avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+              overrideTollEur: tmsTollEur || undefined,
             });
-            // fracht_est = cost + TMS_margin
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
             frachtEstimated = true;
           }
@@ -187,6 +197,7 @@ export default function AnalizaPage() {
             freightEur: frachtEur,
             transitCountries: [originCountry, destCountry],
             avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+            overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
           });
 
           const { label, color } = profitabilityLabel(breakdown.marginPct);
@@ -206,6 +217,7 @@ export default function AnalizaPage() {
             revenuePerKm: breakdown.revenuePerKm,
             totalCost: breakdown.total,
             tollCost: breakdown.toll,
+            tollFromTms: tmsTollEur > 0,
             label, labelColor: color,
             euroClass: vehicleYear ? deriveEuroClass(vehicleYear) : 6,
           };
@@ -626,9 +638,13 @@ export default function AnalizaPage() {
                       )}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600"
-                      title={`Myto: ${r.tollCost.toFixed(2)} EUR · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
+                      title={r.tollFromTms
+                        ? `Myto z TMS (DKV/viaTOLL): ${r.tollCost.toFixed(2)} EUR`
+                        : `Myto z macierzy HBM · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
                       {r.tollCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
-                      <div className="text-xs text-slate-400">{(r.tollCost / r.distanceKm * 100).toFixed(1)} €/100km</div>
+                      <div className={`text-xs font-medium ${r.tollFromTms ? "text-emerald-600" : "text-slate-400"}`}>
+                        {r.tollFromTms ? "✓ TMS" : `≈ macierz`}
+                      </div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
                       {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
