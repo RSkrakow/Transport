@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useState, useRef } from "react";
 import * as XLSX from "xlsx";
@@ -445,4 +445,153 @@ export default function AnalizaPage() {
               <p className="text-xs text-slate-500 uppercase tracking-wide">Niska marża 5–15%</p>
               <p className="text-3xl font-bold text-amber-600 mt-1">{lowMargin}</p>
             </div>
-            <div className
+            <div className="card border-l-4 border-orange-500">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Próg 0–5%</p>
+              <p className="text-3xl font-bold text-orange-600 mt-1">{breakeven}</p>
+            </div>
+            <div className="card border-l-4 border-red-500">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Strata</p>
+              <p className="text-3xl font-bold text-red-600 mt-1">{losses}</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div className="card">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Tras</p>
+              <p className="text-3xl font-bold text-slate-800 mt-1">{rows.length}</p>
+            </div>
+            <div className="card">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Łączny fracht</p>
+              <p className="text-2xl font-bold text-slate-800 mt-1">
+                {totalFreight.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR
+              </p>
+            </div>
+            <div className="card">
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Łączne koszty</p>
+              <p className="text-2xl font-bold text-slate-800 mt-1">
+                {totalCosts.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR
+              </p>
+            </div>
+            <div className={`card ${totalMargin >= 0 ? "border-l-4 border-emerald-500" : "border-l-4 border-red-500"}`}>
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Łączna marża</p>
+              <p className={`text-2xl font-bold mt-1 ${totalMargin >= 0 ? "text-emerald-600" : "text-red-600"}`}>
+                {totalMargin.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR
+              </p>
+              <p className="text-xs text-slate-400">{avgMargin}% średnio</p>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="card overflow-x-auto p-0">
+            <table className="w-full text-sm min-w-[900px]">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Zlecenie</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Trasa</th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Pojazd</th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("distanceKm")}>
+                    Km TMS <SortIcon k="distanceKm" />
+                  </th>
+                  {showOrsColumns && (
+                    <>
+                      <th className="text-right px-3 py-3 text-xs font-semibold text-blue-500 uppercase bg-blue-50/50">Km ORS</th>
+                      <th className="text-center px-3 py-3 text-xs font-semibold text-blue-500 uppercase bg-blue-50/50">Δ km</th>
+                    </>
+                  )}
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("frachtEur")}>Fracht EUR <SortIcon k="frachtEur" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("totalCost")}>Koszty EUR <SortIcon k="totalCost" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("marginPct")}>Marża % <SortIcon k="marginPct" /></th>
+                  <th className="text-center px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sorted.map(r => (
+                  <tr key={r.orderNr}
+                    className={`hover:bg-slate-50 ${borderMap[r.labelColor] ?? ""}
+                      ${r.ors?.status === "alert" ? "bg-red-50/30" : r.ors?.status === "warn" ? "bg-amber-50/20" : ""}`}>
+                    <td className="px-3 py-2.5">
+                      <div className="font-mono text-xs text-slate-700">{r.orderNr}</div>
+                      <div className="text-xs text-slate-400 truncate max-w-[130px]">{r.client}</div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-semibold text-slate-800">{r.originCountry} → {r.destCountry}</div>
+                      <div className="text-xs text-slate-400 truncate max-w-[160px]">{r.originCity} → {r.destCity}</div>
+                    </td>
+                    <td className="px-3 py-2.5">
+                      <div className="font-mono text-xs text-slate-700">{r.vehicle}</div>
+                      <div className="text-xs text-slate-400">{r.avgFuelL100} l/100</div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">
+                      {r.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                    </td>
+                    {showOrsColumns && (
+                      <>
+                        <td className="px-3 py-2.5 text-right bg-blue-50/30">
+                          {r.ors ? (
+                            r.ors.status === "error"
+                              ? <span className="text-slate-300 text-xs" title={r.ors.error}>—</span>
+                              : <span className={`font-medium ${orsStatusColor(r.ors.status)}`}>
+                                  {r.ors.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                                </span>
+                          ) : (
+                            verifying
+                              ? <span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin" />
+                              : <span className="text-slate-300 text-xs">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2.5 text-center bg-blue-50/30">
+                          {r.ors && r.ors.status !== "error" && (
+                            <DiffBadge pct={r.ors.diffKmPct} />
+                          )}
+                        </td>
+                      </>
+                    )}
+                    <td className="px-3 py-2.5 text-right font-semibold text-slate-800">
+                      {r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      {r.currency === "PLN" && <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">
+                      {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right font-bold text-lg ${
+                      r.marginPct >= 15 ? "text-emerald-600" :
+                      r.marginPct >= 5  ? "text-amber-600"   :
+                      r.marginPct >= 0  ? "text-orange-600"  : "text-red-600"}`}>
+                      {r.marginPct}%
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[r.labelColor] ?? ""}`}>
+                        {r.label}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-400 text-center">
+            Spalanie z Trimble per pojazd · Kurs PLN/EUR: {eurRate} · Paliwo: {fuelPrice} EUR/l
+            {verified.length > 0 && ` · ORS: ${verified.length} tras zweryfikowanych`}
+          </p>
+        </>
+      )}
+
+      {!loading && rows.length === 0 && !error && (
+        <div className="card text-center py-16">
+          <p className="text-4xl mb-3">📋</p>
+          <p className="text-slate-600 font-medium">Wgraj plik z trasami aby zobaczyć analizę</p>
+          <p className="text-sm text-slate-400 mt-1">
+            Format: eksport TMS — kolumny Nr pełny, Km ład. wg. mapy, Fracht z walutą, Ciągnik, Kraj/Miasto zał./roz.
+          </p>
+          <p className="text-xs text-slate-400 mt-2">
+            Po załadowaniu możesz uruchomić <strong>weryfikację ORS HGV</strong> — porówna km z TMS z rzeczywistą trasą ciężarówki
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
