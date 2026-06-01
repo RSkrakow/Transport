@@ -13,6 +13,7 @@ export interface RouteInput {
   avgFuelL100?: number;            // override; default fleet avg 29.62
   freightEur: number;
   transitCountries?: string[];     // incl. origin & dest for toll calc
+  overrideTollEur?: number;        // from ORS real-route calculation (replaces matrix)
   leasingEurMo?: number;           // vehicle-specific if known
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
@@ -97,15 +98,19 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   // 3. IDLE FUEL LOSSES — 9.22% of fuel cost (from our data)
   const idle = fuelCost * FLEET.idleFuelPct;
 
-  // 4. TOLLS — average toll across countries on route
-  const countries = transitCountries && transitCountries.length > 0
-    ? transitCountries
-    : [originCountry, destCountry];
-
-  const uniqueCountries = Array.from(new Set(countries));
-  const tollRates = uniqueCountries.map(c => TOLL_MATRIX[c] ?? 8.0);
-  const avgToll   = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
-  const tollCost  = (avgToll / 100) * distanceKm;
+  // 4. TOLLS — use ORS real-route value if available, else matrix average
+  let tollCost: number;
+  if (input.overrideTollEur != null && input.overrideTollEur > 0) {
+    tollCost = input.overrideTollEur;
+  } else {
+    const countries = transitCountries && transitCountries.length > 0
+      ? transitCountries
+      : [originCountry, destCountry];
+    const uniqueCountries = Array.from(new Set(countries));
+    const tollRates = uniqueCountries.map(c => TOLL_MATRIX[c] ?? 8.0);
+    const avgToll   = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
+    tollCost = (avgToll / 100) * distanceKm;
+  }
 
   // 5. DRIVER — EUR/km (includes wages, social, per diems averaged)
   const driverCost = FLEET.driverCostPerKm * distanceKm;

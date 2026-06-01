@@ -10,6 +10,7 @@ import {
 } from "@/lib/calculator";
 import { supabase, type Vehicle } from "@/lib/supabase";
 import CostBreakdownPanel from "./CostBreakdown";
+import RouteFinderPanel from "./RouteFinderPanel";
 
 const TRANSIT_PRESETS: Record<string, string[]> = {
   "PL-DE": ["PL", "DE"],
@@ -39,6 +40,8 @@ export default function RouteCalculator() {
   const [result, setResult] = useState<CostBreakdownType | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [overrideTollEur, setOverrideTollEur] = useState<number | undefined>(undefined);
+  const [showRouteFinder, setShowRouteFinder] = useState(false);
 
   useEffect(() => {
     supabase
@@ -65,6 +68,15 @@ export default function RouteCalculator() {
     return TRANSIT_PRESETS[key] ?? TRANSIT_PRESETS[rev] ?? [form.originCountry, form.destCountry];
   };
 
+  const handleRouteCalculated = (distanceKm: number, tollEur: number, countries: string[]) => {
+    setForm(prev => ({
+      ...prev,
+      distanceKm,
+      customTransit: countries.join(", "),
+    }));
+    setOverrideTollEur(tollEur > 0 ? tollEur : undefined);
+  };
+
   const handleCalculate = () => {
     setSaved(false);
     const input: RouteInput = {
@@ -76,6 +88,7 @@ export default function RouteCalculator() {
       avgFuelL100: selectedVehicle?.avg_fuel_l100 ?? undefined,
       freightEur: Number(form.freightEur),
       transitCountries: getTransitCountries(),
+      overrideTollEur,
       leasingEurMo: selectedVehicle?.leasing_eur_mo ?? undefined,
       vehicleYearProduced: selectedVehicle?.year_produced ?? undefined,
     };
@@ -112,7 +125,26 @@ export default function RouteCalculator() {
     setForm(prev => ({ ...prev, [k]: v }));
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+    <div className="space-y-6">
+
+      {/* ── ROUTE FINDER (collapsible) ── */}
+      <div>
+        <button
+          onClick={() => setShowRouteFinder(v => !v)}
+          className="flex items-center gap-2 text-sm font-medium text-blue-700 hover:text-blue-900 transition-colors"
+        >
+          <span className="text-base">🗺️</span>
+          {showRouteFinder ? "Ukryj kalkulator trasy" : "Oblicz trasę i myto online (HGV)"}
+          <span className="text-xs opacity-60">{showRouteFinder ? "▲" : "▼"}</span>
+        </button>
+        {showRouteFinder && (
+          <div className="mt-3">
+            <RouteFinderPanel onRouteCalculated={handleRouteCalculated} />
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
       {/* ── FORM ── */}
       <div className="lg:col-span-2 card space-y-5">
         <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
@@ -149,13 +181,18 @@ export default function RouteCalculator() {
 
         {/* Distance */}
         <div>
-          <label className="label">Odległość (km)</label>
+          <label className="label flex items-center gap-2">
+            Odległość (km)
+            {overrideTollEur != null && (
+              <span className="text-xs font-normal text-emerald-600">✓ z ORS</span>
+            )}
+          </label>
           <input
             type="number"
             className="input-field"
             value={form.distanceKm}
             min={1}
-            onChange={e => set("distanceKm", e.target.value)}
+            onChange={e => { set("distanceKm", e.target.value); setOverrideTollEur(undefined); }}
           />
         </div>
 
@@ -269,6 +306,15 @@ export default function RouteCalculator() {
           </div>
         )}
       </div>
+    </div>
+
+    {/* indicator that toll was overridden by ORS */}
+    {overrideTollEur != null && (
+      <p className="text-xs text-emerald-700 bg-emerald-50 rounded px-3 py-1.5 inline-flex items-center gap-1">
+        ✓ Myto z ORS: <strong>{overrideTollEur.toFixed(2)} EUR</strong> (rzeczywista trasa HGV)
+        <button onClick={() => setOverrideTollEur(undefined)} className="ml-2 text-slate-400 hover:text-slate-600">✕</button>
+      </p>
+    )}
     </div>
   );
 }
