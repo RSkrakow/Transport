@@ -10,7 +10,8 @@ type ImportType =
   | "kartoteka_kierowcow"
   | "faktury"
   | "rejestr_transportow"
-  | "trimble_fms";
+  | "trimble_fms"
+  | "ubezpieczenia";
 
 interface ImportResult {
   imported: number;
@@ -84,6 +85,12 @@ export default function ImportPanel() {
             file.name
           );
           break;
+        case "ubezpieczenia":
+          res = await importUbezpieczenia(
+            XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, { defval: null }),
+            file.name
+          );
+          break;
         default:
           res = { imported: 0, skipped: 0, errors: ["Nieznany typ importu"] };
       }
@@ -130,6 +137,7 @@ export default function ImportPanel() {
             <option value="faktury">Faktury wystawione (przychody)</option>
             <option value="rejestr_transportow">Rejestr transportów (zlecenia)</option>
             <option value="trimble_fms">Zużycie paliwa FMS (Trimble)</option>
+            <option value="ubezpieczenia">Rejestr ubezpieczeń</option>
           </select>
         </div>
 
@@ -191,6 +199,7 @@ export default function ImportPanel() {
           <li><strong>Faktury przychodowe:</strong> Status płatności, Numer, Data, Kontrahent, Netto PLN, Brutto PLN, Transport</li>
           <li><strong>Rejestr transportów:</strong> Stan, Nr pełny, Ciągnik, Naczepa, Kierowca, Fracht, Zał./Roz. kraj, Km, Marża</li>
           <li><strong>Zużycie paliwa FMS:</strong> Raport Trimble — Pojazd, Kierowca, Data, Jazda l/100km, Bieg jałowy, PTO, Całkowity</li>
+          <li><strong>Rejestr ubezpieczeń:</strong> Nr polisy, Typ (OC/AC/NNW), Nr rej., Marka, Model, VIN, Data początku/końca, Koszt PLN</li>
         </ul>
       </div>
     </div>
@@ -679,6 +688,68 @@ async function importTrimble(
     "fuel_consumption",
     validRows as unknown as Record<string, unknown>[],
     "vehicle_reg,report_date,driver_name"
+  );
+  return { ...res, skipped: res.skipped + skipped };
+}
+
+// ─── Rejestr ubezpieczeń importer ────────────────────────────
+
+interface InsuranceRow {
+  vehicle_reg: string;
+  policy_number: string | null;
+  insurance_type: string | null;
+  is_archived: boolean;
+  vin: string | null;
+  make: string | null;
+  model: string | null;
+  year_produced: number | null;
+  leasing_contract: string | null;
+  policy_start: string | null;
+  policy_end: string | null;
+  cost_pln: number | null;
+  owner: string | null;
+  vehicle_group: string | null;
+}
+
+async function importUbezpieczenia(
+  rows: Record<string, unknown>[],
+  _filename: string
+): Promise<ImportResult> {
+  let skipped = 0;
+
+  const validRows: InsuranceRow[] = rows
+    .map((row): InsuranceRow | null => {
+      const reg = strOrNull(row["Nr rej."] ?? row["Nr rej"] ?? row["Rejestracja"]);
+      if (!reg) { skipped++; return null; }
+
+      const archRaw = strOrNull(row["Archiwum"] ?? row["archiwum"]);
+      const isArchived = archRaw === "T" || archRaw === "TAK" || archRaw === "1";
+
+      const yearRaw = numOrNull(row["Rok produkcji"] ?? row["Rok"]);
+
+      return {
+        vehicle_reg: reg.trim().toUpperCase().replace(/\s+/g, ""),
+        policy_number: strOrNull(row["Numer polisy"] ?? row["Nr polisy"]),
+        insurance_type: strOrNull(row["Typ ubezpieczenia"] ?? row["Typ"]),
+        is_archived: isArchived,
+        vin: strOrNull(row["VIN"]),
+        make: strOrNull(row["Marka"]),
+        model: strOrNull(row["Model"]),
+        year_produced: yearRaw ? Math.round(yearRaw) : null,
+        leasing_contract: strOrNull(row["Nr umowy leasingu"] ?? row["Leasing"]),
+        policy_start: dateOrNull(row["Data początku ubezpieczenia"] ?? row["Data poczatku ubezpieczenia"] ?? row["Data początku"]),
+        policy_end: dateOrNull(row["Data końca ubezpieczenia"] ?? row["Data konca ubezpieczenia"] ?? row["Data końca"]),
+        cost_pln: numOrNull(row["Koszt ubezpieczenia"] ?? row["Koszt"]),
+        owner: strOrNull(row["Użytkownik"] ?? row["Uzytkownik"] ?? row["Właściciel"] ?? row["Wlasciciel"]),
+        vehicle_group: strOrNull(row["Grupa pojazdu"] ?? row["Grupa"]),
+      };
+    })
+    .filter((r): r is InsuranceRow => r !== null);
+
+  const res = await upsertBatches(
+    "insurance_policies",
+    validRows as unknown as Record<string, unknown>[],
+    "vehicle_reg,insurance_type,policy_start"
   );
   return { ...res, skipped: res.skipped + skipped };
 }

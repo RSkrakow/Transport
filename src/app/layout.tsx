@@ -60,6 +60,12 @@ export default function RootLayout({
                   FMS
                 </Link>
                 <Link
+                  href="/ubezpieczenia"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  Ubezpieczenia
+                </Link>
+                <Link
                   href="/import"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >
