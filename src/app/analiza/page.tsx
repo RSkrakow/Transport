@@ -102,10 +102,21 @@ export default function AnalizaPage() {
           const orderNr = String(row["Nr pełny"] ?? row["Nr"] ?? "").trim();
           if (!orderNr) return null;
 
-          const distanceKm = Number(row["Km ład. wg. mapy"] ?? row["Km"] ?? 0);
+          const kmKey = Object.keys(row).find(k => k.toLowerCase().includes("km") && k.toLowerCase().includes("map"));
+          const distanceKm = Number((kmKey ? row[kmKey] : null) ?? row["Km ład. wg. mapy"] ?? row["Km"] ?? 0);
           if (distanceKm < 10) return null; // skip invalid
 
-          const frachtRaw = String(row["Fracht z walutą"] ?? row["Fracht"] ?? "0 EUR");
+          // Column may appear as "Fracht z walutą *" (with asterisk) or without
+          // Also do a fuzzy search in case of encoding differences
+          const frachtKey = Object.keys(row).find(k =>
+            k.toLowerCase().includes("fracht") && k.toLowerCase().includes("walut")
+          );
+          const frachtRaw = String(
+            (frachtKey ? row[frachtKey] : null) ??
+            row["Fracht z walutą *"] ?? row["Fracht z walutą"] ??
+            row["Fracht z waluta *"] ?? row["Fracht z waluta"] ??
+            row["Fracht"] ?? "0 EUR"
+          );
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
           const frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
 
