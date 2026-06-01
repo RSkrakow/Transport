@@ -38,15 +38,20 @@ export interface CostBreakdown {
 
 // ─── Fleet constants (from our data analysis) ────────────────
 export const FLEET = {
-  avgFuelL100:       27.80,   // Trimble FMS, 55 vehicles, Jan-May 2026 (was 29.62 from 2024-2025)
-  driverCostPerKm:   0.643,   // 3,328,285 EUR / 5,180,419 km
-  serviceCostNewKm:  0.009,   // MAN TGX 2023-2024
-  serviceCostOldKm:  0.020,   // MAN TGX 2018-2019, DAF XF 2019
-  leasingNewEurMo:   733.33,  // ~8,800 EUR/yr
-  leasingOldEurMo:   520.83,  // ~6,250 EUR/yr
-  avgKmPerMonth:     11_667,  // 140k km/yr
-  idleFuelPct:       0.021,   // 2.1% idle losses (Trimble FMS Jan-May 2026; was 9.22% from wydatki.xls)
-  adblueRatePct:     0.035,   // AdBlue = 3.5% of diesel volume
+  avgFuelL100:          27.80,    // Trimble FMS, 55 vehicles, Jan-May 2026
+  // Driver cost: agencja pracy 4 700 EUR brutto/kierowcę/mies. (faktura + 23% VAT)
+  // Netto = 4 700 / 1.23 = 3 821 EUR/mies. (VAT odliczany)
+  // Per km = 3 821 / 11 667 = 0.3275 EUR/km
+  driverCostEurMoGross: 4_700,    // EUR brutto (z VAT 23%) — faktura agencji pracy
+  driverCostEurMoNet:   3_821,    // EUR netto (po odliczeniu VAT 23%)
+  driverCostPerKm:      0.3275,   // 3 821 EUR / 11 667 km/mies.
+  serviceCostNewKm:     0.009,    // MAN TGX 2023-2024
+  serviceCostOldKm:     0.020,    // MAN TGX 2018-2019, DAF XF 2019
+  leasingNewEurMo:      733.33,   // ~8,800 EUR/yr
+  leasingOldEurMo:      520.83,   // ~6,250 EUR/yr
+  avgKmPerMonth:        11_667,   // 140k km/yr
+  idleFuelPct:          0.021,    // 2.1% idle losses (Trimble FMS Jan-May 2026)
+  adblueRatePct:        0.035,    // AdBlue = 3.5% of diesel volume
 } as const;
 
 // ─── Toll matrix EUR/100km (seeded from wydatki.xls + market) ─
@@ -112,7 +117,7 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     tollCost = (avgToll / 100) * distanceKm;
   }
 
-  // 5. DRIVER — EUR/km (includes wages, social, per diems averaged)
+  // 5. DRIVER — agencja pracy: 4 700 EUR brutto/mies. → 3 821 EUR netto/mies. → 0.3275 EUR/km
   const driverCost = FLEET.driverCostPerKm * distanceKm;
 
   // 6. SERVICE — new vs old vehicle tier
