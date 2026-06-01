@@ -35,6 +35,7 @@ interface RouteRow {
   costPerKm: number;
   revenuePerKm: number;
   totalCost: number;
+  tollCost: number;       // EUR — myto (z macierzy lub ORS)
   label: string;
   labelColor: string;
   euroClass: number;      // 3 | 4 | 5 | 6 — derived from vehicle year
@@ -204,6 +205,7 @@ export default function AnalizaPage() {
             costPerKm: breakdown.costPerKm,
             revenuePerKm: breakdown.revenuePerKm,
             totalCost: breakdown.total,
+            tollCost: breakdown.toll,
             label, labelColor: color,
             euroClass: vehicleYear ? deriveEuroClass(vehicleYear) : 6,
           };
@@ -551,6 +553,8 @@ export default function AnalizaPage() {
                   <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
                     onClick={() => toggleSort("frachtEur")}>Fracht EUR <SortIcon k="frachtEur" /></th>
                   <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("tollCost")} title="Myto wg macierzy stawek + klasy EURO pojazdu">Myto EUR <SortIcon k="tollCost" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
                     onClick={() => toggleSort("totalCost")}>Koszty EUR <SortIcon k="totalCost" /></th>
                   <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
                     onClick={() => toggleSort("marginPct")}>Marża % <SortIcon k="marginPct" /></th>
@@ -620,6 +624,11 @@ export default function AnalizaPage() {
                       {r.currency === "PLN" && !r.frachtEstimated && (
                         <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>
                       )}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-600"
+                      title={`Myto: ${r.tollCost.toFixed(2)} EUR · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
+                      {r.tollCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      <div className="text-xs text-slate-400">{(r.tollCost / r.distanceKm * 100).toFixed(1)} €/100km</div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
                       {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
