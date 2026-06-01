@@ -25,9 +25,14 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.ORS_API_KEY ?? "";
 
+    // Qualify city names with country to avoid Nominatim geocoding wrong city
+    // e.g. "Levice, SK" instead of just "Levice" (could match a town in another country)
+    const fromQuery = originCountry ? `${from}, ${originCountry}` : from;
+    const toQuery   = destCountry   ? `${to}, ${destCountry}`     : to;
+
     const [fromGeo, toGeo] = await Promise.all([
-      geocodeCity(from),
-      geocodeCity(to),
+      geocodeCity(fromQuery),
+      geocodeCity(toQuery),
     ]);
 
     if (!fromGeo || !toGeo) {
