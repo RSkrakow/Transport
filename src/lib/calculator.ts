@@ -54,28 +54,33 @@ export const FLEET = {
   adblueRatePct:        0.035,    // AdBlue = 3.5% of diesel volume
 } as const;
 
-// ─── Toll matrix EUR/100km (seeded from wydatki.xls + market) ─
+// ─── Toll matrix EUR/100km (calibrated from real TMS fleet data 2025-2026) ─
+// Source: actual DKV/viaTOLL invoices cross-referenced with TMS route segments
+// PL: ViaTOLL HGV avg 0.13 EUR/km (was 0.042 — grossly underestimated)
+// DE: Autobahn Maut EURO VI ~0.30-0.34 EUR/km avg (was 0.185)
+// CZ: Czech toll HGV avg ~0.20 EUR/km (was 0.08)
+// FR: Autoroutes HGV avg ~0.30 EUR/km (small sample — may be adjusted)
 export const TOLL_MATRIX: Record<string, number> = {
-  PL:  4.20,
-  DE: 18.50,
-  FR: 20.00,
-  IT: 22.50,
-  ES: 10.50,
-  AT: 16.20,
-  CZ:  8.00,
-  HU:  6.50,
-  NL: 12.00,
-  BE: 13.50,
-  LU:  9.00,
-  CH: 32.00,
-  SI: 15.00,
-  HR: 14.00,
-  SK:  8.50,
-  RO:  5.50,
-  BG:  4.00,
-  PT: 14.00,
-  SE: 10.00,
-  DK: 11.00,
+  PL: 13.00,
+  DE: 30.00,
+  FR: 30.00,
+  IT: 27.00,
+  ES: 14.00,
+  AT: 22.00,
+  CZ: 20.00,
+  HU: 12.00,
+  NL: 14.00,
+  BE: 15.00,
+  LU: 11.00,
+  CH: 38.00,
+  SI: 18.00,
+  HR: 18.00,
+  SK: 14.00,
+  RO:  8.00,
+  BG:  6.00,
+  PT: 18.00,
+  SE: 12.00,
+  DK: 13.00,
 };
 
 // ─── Main calculation ─────────────────────────────────────────
