@@ -26,8 +26,10 @@ interface RouteRow {
   distanceKm: number;
   frachtRaw: string;
   frachtEur: number;
+  frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from TMS margin/km
   currency: string;
   avgFuelL100: number;
+  tmsMarzaPerKm: number;      // "Marża EUR na 1 KM z mapy" from TMS
   marginEur: number;
   marginPct: number;
   costPerKm: number;
@@ -82,6 +84,7 @@ export default function AnalizaPage() {
   const [verifying, setVerifying] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState({ done: 0, total: 0 });
   const [showOrsColumns, setShowOrsColumns] = useState(false);
+  const [hideEstimated, setHideEstimated] = useState(false);
 
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -145,7 +148,7 @@ export default function AnalizaPage() {
 
           const frachtRaw = get(row, "fracht z wal", "fracht");
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
-          const frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
+          let frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
 
           const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
           const originCountry = get(row, "zał. kraj", "zal. kraj", "kraj za").toUpperCase() || "PL";
@@ -156,6 +159,25 @@ export default function AnalizaPage() {
           const avgFuelL100  = fuelMap[vehicle] ?? FLEET.avgFuelL100;
           const vehicleYear  = yearMap[vehicle];
           const leasingEurMo = leasingMap[vehicle];
+
+          // TMS own margin/km — "Marża EUR na 1 KM z mapy"
+          const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
+          const tmsMarzaPerKm = isNaN(tmsMarzaPerKmRaw) ? 0 : tmsMarzaPerKmRaw;
+
+          // Estimate fracht when TMS has no invoice yet (fracht=0)
+          // fracht_est = our_HBM_cost + TMS_margin_EUR (TMS margin = marza_per_km × km)
+          let frachtEstimated = false;
+          if (frachtEur === 0 && tmsMarzaPerKm > 0) {
+            const breakdown0 = calculateRoute({
+              originCountry, destCountry, distanceKm,
+              fuelPriceEurL: fuelPrice, freightEur: 1,
+              transitCountries: [originCountry, destCountry],
+              avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+            });
+            // fracht_est = cost + TMS_margin
+            frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
+            frachtEstimated = true;
+          }
 
           const breakdown = calculateRoute({
             originCountry, destCountry, distanceKm,
@@ -174,7 +196,8 @@ export default function AnalizaPage() {
             originCountry, destCountry, originCity, destCity,
             distanceKm, frachtRaw,
             frachtEur: Math.round(frachtEur * 100) / 100,
-            currency, avgFuelL100,
+            frachtEstimated,
+            currency, avgFuelL100, tmsMarzaPerKm,
             marginEur: breakdown.marginEur,
             marginPct: breakdown.marginPct,
             costPerKm: breakdown.costPerKm,
@@ -265,7 +288,7 @@ export default function AnalizaPage() {
     else { setSortKey(key); setSortDesc(key === "marginPct" ? false : true); }
   }
 
-  const sorted = [...rows].sort((a, b) => {
+  const sorted = [...displayRows].sort((a, b) => {
     const av = a[sortKey]; const bv = b[sortKey];
     if (typeof av === "number" && typeof bv === "number")
       return sortDesc ? bv - av : av - bv;
@@ -275,18 +298,22 @@ export default function AnalizaPage() {
   const SortIcon = ({ k }: { k: keyof RouteRow }) =>
     sortKey === k ? <span className="ml-1">{sortDesc ? "↓" : "↑"}</span> : null;
 
-  const profitable  = rows.filter(r => r.marginPct >= 15).length;
-  const lowMargin   = rows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
-  const breakeven   = rows.filter(r => r.marginPct >= 0 && r.marginPct < 5).length;
-  const losses      = rows.filter(r => r.marginPct < 0).length;
-  const totalFreight = rows.reduce((s, r) => s + r.frachtEur, 0);
-  const totalCosts   = rows.reduce((s, r) => s + r.totalCost, 0);
+  const estimatedCount = rows.filter(r => r.frachtEstimated).length;
+  const noFreightCount = rows.filter(r => r.frachtEur === 0 && !r.frachtEstimated).length;
+  const displayRows    = hideEstimated ? rows.filter(r => !r.frachtEstimated) : rows;
+
+  const profitable  = displayRows.filter(r => r.marginPct >= 15).length;
+  const lowMargin   = displayRows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
+  const breakeven   = displayRows.filter(r => r.marginPct >= 0 && r.marginPct < 5).length;
+  const losses      = displayRows.filter(r => r.marginPct < 0).length;
+  const totalFreight = displayRows.reduce((s, r) => s + r.frachtEur, 0);
+  const totalCosts   = displayRows.reduce((s, r) => s + r.totalCost, 0);
   const totalMargin  = totalFreight - totalCosts;
-  const avgMargin    = rows.length > 0
-    ? Math.round(rows.reduce((s, r) => s + r.marginPct, 0) / rows.length * 10) / 10 : 0;
+  const avgMargin    = displayRows.length > 0
+    ? Math.round(displayRows.reduce((s, r) => s + r.marginPct, 0) / displayRows.length * 10) / 10 : 0;
 
   // ORS stats
-  const verified       = rows.filter(r => r.ors && r.ors.status !== "error");
+  const verified       = displayRows.filter(r => r.ors && r.ors.status !== "error");
   const alertCount     = verified.filter(r => r.ors!.status === "alert").length;
   const warnCount      = verified.filter(r => r.ors!.status === "warn").length;
   const totalKmTms     = verified.reduce((s, r) => s + r.distanceKm, 0);
@@ -400,6 +427,25 @@ export default function AnalizaPage() {
               {showOrsColumns ? "Ukryj kolumny ORS" : "Pokaż kolumny ORS"}
             </button>
           )}
+        </div>
+      )}
+
+      {/* Estimated freight banner */}
+      {estimatedCount > 0 && (
+        <div className="flex items-center justify-between gap-4 px-4 py-3 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+          <div className="flex items-center gap-2">
+            <span className="text-amber-600 font-bold">⚠️</span>
+            <span className="text-amber-800">
+              <strong>{estimatedCount} tras</strong> bez faktury w TMS — fracht szacowany z marży TMS (koszt HBM + marża TMS/km).
+              {noFreightCount > 0 && <span className="ml-2 text-amber-600">+{noFreightCount} bez danych — pominięte.</span>}
+            </span>
+          </div>
+          <button
+            onClick={() => setHideEstimated(v => !v)}
+            className="shrink-0 text-xs px-3 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 font-semibold rounded-lg transition-colors"
+          >
+            {hideEstimated ? `Pokaż szacowane (${estimatedCount})` : `Ukryj szacowane (${estimatedCount})`}
+          </button>
         </div>
       )}
 
@@ -553,7 +599,14 @@ export default function AnalizaPage() {
                     )}
                     <td className="px-3 py-2.5 text-right font-semibold text-slate-800">
                       {r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
-                      {r.currency === "PLN" && <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>}
+                      {r.frachtEstimated && (
+                        <div className="text-xs text-amber-500 font-normal" title={`Szacowany: koszt HBM + marża TMS ${r.tmsMarzaPerKm} EUR/km`}>
+                          ~szacowany
+                        </div>
+                      )}
+                      {r.currency === "PLN" && !r.frachtEstimated && (
+                        <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
                       {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
