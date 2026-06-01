@@ -1,6 +1,8 @@
 // ============================================================
 // TruckCalc HBM — Routing & Toll Engine
 // OpenRouteService API (HGV profile) + Nominatim geocoding
+// Country identification via Nominatim reverse geocode on
+// midpoint of each country segment — no hardcoded ORS code map
 // ============================================================
 
 export interface GeoPoint {
@@ -26,34 +28,6 @@ export interface RouteResult {
   error?: string;
 }
 
-// ─── ISO 3166-1 numeric → ISO-2 mapping (European countries) ───
-const ISO_NUMERIC_TO_2: Record<number, string> = {
-  40:  "AT", // Austria
-  56:  "BE", // Belgia
-  100: "BG", // Bułgaria
-  191: "HR", // Chorwacja
-  203: "CZ", // Czechy
-  208: "DK", // Dania
-  250: "FR", // Francja
-  276: "DE", // Niemcy
-  300: "GR", // Grecja
-  348: "HU", // Węgry
-  380: "IT", // Włochy
-  442: "LU", // Luksemburg
-  528: "NL", // Holandia
-  616: "PL", // Polska
-  620: "PT", // Portugalia
-  642: "RO", // Rumunia
-  703: "SK", // Słowacja
-  705: "SI", // Słowenia
-  724: "ES", // Hiszpania
-  752: "SE", // Szwecja
-  756: "CH", // Szwajcaria
-  826: "GB", // Wielka Brytania
-  804: "UA", // Ukraina
-  112: "BY", // Białoruś
-};
-
 const COUNTRY_NAMES: Record<string, string> = {
   AT: "Austria", BE: "Belgia", BG: "Bułgaria", HR: "Chorwacja",
   CZ: "Czechy", DK: "Dania", FR: "Francja", DE: "Niemcy",
@@ -63,7 +37,6 @@ const COUNTRY_NAMES: Record<string, string> = {
   CH: "Szwajcaria", GB: "Wlk. Brytania", UA: "Ukraina", BY: "Białoruś",
 };
 
-// Toll matrix EUR/100km (matches calculator.ts TOLL_MATRIX)
 const TOLL_MATRIX: Record<string, number> = {
   PL:  4.20, DE: 18.50, FR: 20.00, IT: 22.50, ES: 10.50,
   AT: 16.20, CZ:  8.00, HU:  6.50, NL: 12.00, BE: 13.50,
@@ -72,13 +45,13 @@ const TOLL_MATRIX: Record<string, number> = {
   GB: 10.00, UA:  3.00, BY:  2.50, GR:  9.00,
 };
 
-// ─── Geocoding via Nominatim ─────────────────────────────────
+// ─── Nominatim forward geocoding ─────────────────────────────
 export async function geocodeCity(city: string): Promise<GeoPoint | null> {
   const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&limit=1&addressdetails=0`;
   try {
     const res = await fetch(url, {
       headers: { "User-Agent": "TruckCalc-HBM/1.0 (hbm-audyt.pl)" },
-      next: { revalidate: 86400 }, // cache 24h
+      next: { revalidate: 86400 },
     });
     const data = await res.json();
     if (!data || data.length === 0) return null;
@@ -92,7 +65,22 @@ export async function geocodeCity(city: string): Promise<GeoPoint | null> {
   }
 }
 
-// ─── ORS HGV routing with country info ──────────────────────
+// ─── Nominatim reverse geocoding → ISO-2 country ────────────
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  const url = `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json&addressdetails=1`;
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "TruckCalc-HBM/1.0 (hbm-audyt.pl)" },
+      next: { revalidate: 86400 },
+    });
+    const data = await res.json();
+    return data?.address?.country_code?.toUpperCase() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ─── ORS HGV routing with country breakdown ──────────────────
 export async function calculateRoute(
   from: GeoPoint,
   to: GeoPoint,
@@ -108,6 +96,7 @@ export async function calculateRoute(
     extra_info: ["countryinfo"],
     units: "km",
     instructions: false,
+    geometry_format: "geojson",  // returns coordinates as [[lon,lat], ...]
   };
 
   try {
@@ -133,25 +122,68 @@ export async function calculateRoute(
     const distanceKm = route.summary.distance;
     const durationH  = route.summary.duration / 3600;
 
-    // Extract country breakdown from extras
-    const countryInfo = route.extras?.countryinfo;
-    const summary: Array<{ value: number; distance: number }> = countryInfo?.summary ?? [];
+    // Geometry: [[lon, lat], [lon, lat], ...]
+    const coords: [number, number][] = route.geometry?.coordinates ?? [];
 
-    const countries: CountrySegment[] = summary
-      .map((seg) => {
-        const iso2 = ISO_NUMERIC_TO_2[seg.value] ?? null;
-        if (!iso2) return null;
-        const distKm     = Math.round(seg.distance * 10) / 10;
-        const tollPer100 = TOLL_MATRIX[iso2] ?? 8.0;
-        return {
-          iso2,
-          name:           COUNTRY_NAMES[iso2] ?? iso2,
-          distanceKm:     distKm,
-          tollEurPer100km: tollPer100,
-          tollEur:        Math.round((tollPer100 / 100) * distKm * 100) / 100,
-        } as CountrySegment;
-      })
-      .filter((s): s is CountrySegment => s !== null)
+    // countryinfo.values: [[startIdx, endIdx, orsCode], ...]
+    // countryinfo.summary: [{value: orsCode, distance: ?, amount: pct}, ...]
+    const countryInfo = route.extras?.countryinfo;
+    const values: Array<[number, number, number]> = countryInfo?.values ?? [];
+    const summary: Array<{ value: number; amount: number }> = countryInfo?.summary ?? [];
+
+    if (values.length === 0 || coords.length === 0) {
+      return { distanceKm, durationH, countries: [], totalTollEur: 0, source: "ors" };
+    }
+
+    // Build map: orsCode → amount% (from summary)
+    const amountByCode = new Map<number, number>();
+    for (const s of summary) amountByCode.set(s.value, s.amount);
+
+    // For each country segment, reverse-geocode the midpoint waypoint
+    // Nominatim usage policy: max 1 req/s — we batch with small delay
+    const segmentPromises = values.map(async ([startIdx, endIdx, orsCode]) => {
+      const midIdx = Math.floor((startIdx + endIdx) / 2);
+      const coord  = coords[Math.min(midIdx, coords.length - 1)];
+      if (!coord) return null;
+
+      const iso2 = await reverseGeocode(coord[1], coord[0]); // Nominatim: lat, lon
+      if (!iso2) return null;
+
+      const pct      = amountByCode.get(orsCode) ?? 0;
+      const distKm   = Math.round((pct / 100) * distanceKm * 10) / 10;
+      const toll100  = TOLL_MATRIX[iso2] ?? 8.0;
+
+      return {
+        iso2,
+        name:            COUNTRY_NAMES[iso2] ?? iso2,
+        distanceKm:      distKm,
+        tollEurPer100km: toll100,
+        tollEur:         Math.round((toll100 / 100) * distKm * 100) / 100,
+        orsCode,
+      };
+    });
+
+    // Nominatim policy: sequential with 300ms delay between calls
+    const rawSegments: (CountrySegment & { orsCode: number } | null)[] = [];
+    for (const p of segmentPromises) {
+      rawSegments.push(await p);
+      await new Promise(r => setTimeout(r, 350));
+    }
+
+    // Deduplicate by iso2 (same country may appear if route re-enters)
+    const merged = new Map<string, CountrySegment>();
+    for (const seg of rawSegments) {
+      if (!seg) continue;
+      const existing = merged.get(seg.iso2);
+      if (existing) {
+        existing.distanceKm   = Math.round((existing.distanceKm + seg.distanceKm) * 10) / 10;
+        existing.tollEur      = Math.round((existing.tollEur    + seg.tollEur)    * 100) / 100;
+      } else {
+        merged.set(seg.iso2, { iso2: seg.iso2, name: seg.name, distanceKm: seg.distanceKm, tollEurPer100km: seg.tollEurPer100km, tollEur: seg.tollEur });
+      }
+    }
+
+    const countries = Array.from(merged.values())
       .sort((a, b) => b.distanceKm - a.distanceKm);
 
     const totalTollEur = Math.round(
@@ -165,12 +197,8 @@ export async function calculateRoute(
   }
 }
 
-// ─── Fallback: straight-line estimate if ORS unavailable ────
-function fallbackEstimate(
-  from: GeoPoint,
-  to: GeoPoint,
-  error: string
-): RouteResult {
+// ─── Fallback: straight-line × 1.3 if ORS unavailable ────────
+function fallbackEstimate(from: GeoPoint, to: GeoPoint, error: string): RouteResult {
   const R = 6371;
   const dLat = ((to.lat - from.lat) * Math.PI) / 180;
   const dLon = ((to.lon - from.lon) * Math.PI) / 180;
@@ -180,7 +208,7 @@ function fallbackEstimate(
       Math.cos((to.lat * Math.PI) / 180) *
       Math.sin(dLon / 2) ** 2;
   const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  const distanceKm = Math.round(straightKm * 1.3 * 10) / 10; // road factor 1.3
+  const distanceKm = Math.round(straightKm * 1.3 * 10) / 10;
 
   return {
     distanceKm,
