@@ -17,50 +17,33 @@ interface RouteRow {
   frachtRaw: string;
   frachtEur: number;
   currency: string;
-  pickupDate: string;
-  driver: string;
-  // Computed
   avgFuelL100: number;
   marginEur: number;
   marginPct: number;
   costPerKm: number;
   revenuePerKm: number;
-  fuelCost: number;
-  tollCost: number;
-  driverCost: number;
-  leasingCost: number;
   totalCost: number;
   label: string;
   labelColor: string;
 }
 
-const PLN_EUR_RATE = 4.27; // approximate; can be overridden
-
 function parseFracht(s: string): { amount: number; currency: string } {
   if (!s) return { amount: 0, currency: "EUR" };
-  const m = String(s).trim().match(/([\d\s.,]+)\s*([A-Z]{3})/);
+  const str = String(s).replace(/\s/g, "");
+  const m = str.match(/([\d,.]+)([A-Z]{3})/);
   if (!m) return { amount: 0, currency: "EUR" };
-  const num = parseFloat(m[1].replace(/\s/g, "").replace(",", "."));
+  const num = parseFloat(m[1].replace(",", "."));
   return { amount: isNaN(num) ? 0 : num, currency: m[2] };
-}
-
-function excelDateToStr(v: unknown): string {
-  if (!v) return "—";
-  if (v instanceof Date) return v.toLocaleDateString("pl-PL");
-  const n = Number(v);
-  if (!isNaN(n) && n > 1000) {
-    const d = new Date((n - 25569) * 86400 * 1000);
-    return d.toLocaleDateString("pl-PL");
-  }
-  return String(v);
 }
 
 export default function AnalizaPage() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<RouteRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [debug, setDebug] = useState<string | null>(null);
   const [filename, setFilename] = useState("");
-  const [eurRate, setEurRate] = useState(PLN_EUR_RATE);
+  const [eurRate, setEurRate] = useState(4.27);
   const [fuelPrice, setFuelPrice] = useState(1.25);
   const [sortKey, setSortKey] = useState<keyof RouteRow>("marginPct");
   const [sortDesc, setSortDesc] = useState(false);
@@ -68,96 +51,92 @@ export default function AnalizaPage() {
   async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+
     setFilename(file.name);
     setLoading(true);
     setRows([]);
+    setError(null);
+    setDebug(null);
 
     try {
-      // Fetch vehicle fuel data from DB
-      const { data: vehicles } = await supabase
+      // 1. Fetch vehicle data
+      const { data: vehicles, error: dbErr } = await supabase
         .from("vehicles")
         .select("reg, avg_fuel_l100, year_produced, leasing_eur_mo");
+
+      if (dbErr) setDebug(`DB warning: ${dbErr.message}`);
 
       const fuelMap: Record<string, number> = {};
       const yearMap: Record<string, number> = {};
       const leasingMap: Record<string, number> = {};
       for (const v of vehicles ?? []) {
-        if (v.reg && v.avg_fuel_l100) fuelMap[v.reg] = v.avg_fuel_l100;
-        if (v.reg && v.year_produced) yearMap[v.reg] = v.year_produced;
-        if (v.reg && v.leasing_eur_mo) leasingMap[v.reg] = v.leasing_eur_mo;
+        if (v.reg && v.avg_fuel_l100) fuelMap[v.reg] = Number(v.avg_fuel_l100);
+        if (v.reg && v.year_produced) yearMap[v.reg] = Number(v.year_produced);
+        if (v.reg && v.leasing_eur_mo) leasingMap[v.reg] = Number(v.leasing_eur_mo);
       }
 
+      // 2. Read file
       const ab = await file.arrayBuffer();
       const wb = XLSX.read(ab, { type: "array", cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
 
-      // Read all rows as arrays first, then detect header row
-      const allRows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
-        header: 1,
-        defval: null,
-      }) as unknown[][];
+      // 3. Read as raw 2D array
+      const all = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: "" }) as string[][];
 
-      // Find the header row — it's the first row that contains "Nr pełny" or "Stan"
-      let headerIdx = 0;
-      for (let i = 0; i < Math.min(5, allRows.length); i++) {
-        const r = allRows[i] as unknown[];
-        if (r.some(c => String(c ?? "").includes("Nr") || String(c ?? "").includes("Stan"))) {
-          headerIdx = i;
-          break;
-        }
+      // 4. Find header row (contains "Nr" and "kraj")
+      let hIdx = 0;
+      for (let i = 0; i < Math.min(5, all.length); i++) {
+        const joined = all[i].join("|").toLowerCase();
+        if (joined.includes("nr") && joined.includes("kraj")) { hIdx = i; break; }
       }
 
-      const headers = (allRows[headerIdx] as unknown[]).map(h => String(h ?? "").trim());
-      const dataRows = allRows.slice(headerIdx + 1);
+      const headers = all[hIdx].map(h => String(h).trim());
+      const dataRows = all.slice(hIdx + 1).filter(r => r.some(c => String(c).trim() !== ""));
 
-      // Convert to named-key objects
-      const rawRows: Record<string, unknown>[] = dataRows.map(row => {
-        const obj: Record<string, unknown> = {};
-        headers.forEach((h, i) => { obj[h] = (row as unknown[])[i]; });
-        return obj;
-      });
+      setDebug(`Znaleziono ${dataRows.length} wierszy danych, nagłówek: wiersz ${hIdx}. Kolumny: ${headers.filter(h=>h).slice(0,8).join(", ")}…`);
 
-      const computed: RouteRow[] = rawRows
+      // 5. Helper to get value by partial column name match
+      function get(row: string[], ...keys: string[]): string {
+        for (const key of keys) {
+          const idx = headers.findIndex(h => h.toLowerCase().includes(key.toLowerCase()));
+          if (idx >= 0 && row[idx] != null && String(row[idx]).trim() !== "") {
+            return String(row[idx]).trim();
+          }
+        }
+        return "";
+      }
+
+      const currentEurRate = eurRate;
+      const currentFuelPrice = fuelPrice;
+
+      // 6. Compute profitability per row
+      const computed: RouteRow[] = dataRows
         .map((row): RouteRow | null => {
-          const orderNr = String(row["Nr pełny"] ?? row["Nr"] ?? "").trim();
+          const orderNr = get(row, "Nr pełny", "Nr pe", "Nr ");
           if (!orderNr) return null;
 
-          const kmKey = Object.keys(row).find(k => k.toLowerCase().includes("km") && k.toLowerCase().includes("map"));
-          const distanceKm = Number((kmKey ? row[kmKey] : null) ?? row["Km ład. wg. mapy"] ?? row["Km"] ?? 0);
-          if (distanceKm < 10) return null; // skip invalid
+          const distanceKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+          if (distanceKm < 10) return null;
 
-          // Column may appear as "Fracht z walutą *" (with asterisk) or without
-          // Also do a fuzzy search in case of encoding differences
-          const frachtKey = Object.keys(row).find(k =>
-            k.toLowerCase().includes("fracht") && k.toLowerCase().includes("walut")
-          );
-          const frachtRaw = String(
-            (frachtKey ? row[frachtKey] : null) ??
-            row["Fracht z walutą *"] ?? row["Fracht z walutą"] ??
-            row["Fracht z waluta *"] ?? row["Fracht z waluta"] ??
-            row["Fracht"] ?? "0 EUR"
-          );
+          const frachtRaw = get(row, "fracht z wal", "fracht");
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
-          const frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
+          const frachtEur = currency === "PLN" ? frachtAmount / currentEurRate : frachtAmount;
 
-          const vehicle = String(row["Ciągnik"] ?? row["Pojazd"] ?? "").trim().toUpperCase();
-          const originCountry = String(row["Zał. kraj"] ?? "PL").trim().toUpperCase();
-          const destCountry = String(row["Roz. kraj"] ?? "PL").trim().toUpperCase();
-
-          // Determine transit countries from origin+dest
-          const transitCountries = Array.from(new Set([originCountry, destCountry]));
+          const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+          const originCountry = get(row, "zał. kraj", "zal. kraj", "kraj za").toUpperCase() || "PL";
+          const destCountry = get(row, "roz. kraj", "kraj ro").toUpperCase() || "PL";
 
           const avgFuelL100 = fuelMap[vehicle] ?? FLEET.avgFuelL100;
-          const vehicleYear = yearMap[vehicle] ?? undefined;
-          const leasingEurMo = leasingMap[vehicle] ?? undefined;
+          const vehicleYear = yearMap[vehicle];
+          const leasingEurMo = leasingMap[vehicle];
 
           const breakdown = calculateRoute({
             originCountry,
             destCountry,
             distanceKm,
-            fuelPriceEurL: fuelPrice,
+            fuelPriceEurL: currentFuelPrice,
             freightEur: frachtEur,
-            transitCountries,
+            transitCountries: [originCountry, destCountry],
             avgFuelL100,
             vehicleYearProduced: vehicleYear,
             leasingEurMo,
@@ -167,27 +146,21 @@ export default function AnalizaPage() {
 
           return {
             orderNr,
-            client: String(row["Zleceniodawca"] ?? "").trim(),
-            vehicle,
+            client: get(row, "zleceniodawca", "klient"),
+            vehicle: vehicle || "—",
             originCountry,
             destCountry,
-            originCity: String(row["Zał. miasto"] ?? "").trim(),
-            destCity: String(row["Roz. miasto"] ?? "").trim(),
+            originCity: get(row, "zał. miasto", "zal. miasto"),
+            destCity: get(row, "roz. miasto"),
             distanceKm,
             frachtRaw,
             frachtEur: Math.round(frachtEur * 100) / 100,
             currency,
-            pickupDate: excelDateToStr(row["Podjęcie"]),
-            driver: String(row["Kierowca 1"] ?? "").trim(),
             avgFuelL100,
             marginEur: breakdown.marginEur,
             marginPct: breakdown.marginPct,
             costPerKm: breakdown.costPerKm,
             revenuePerKm: breakdown.revenuePerKm,
-            fuelCost: breakdown.fuel,
-            tollCost: breakdown.toll,
-            driverCost: breakdown.driver,
-            leasingCost: breakdown.leasing,
             totalCost: breakdown.total,
             label,
             labelColor: color,
@@ -197,11 +170,11 @@ export default function AnalizaPage() {
 
       setRows(computed);
     } catch (err) {
-      console.error(err);
+      setError(String(err));
+    } finally {
+      setLoading(false);
+      if (fileRef.current) fileRef.current.value = "";
     }
-
-    setLoading(false);
-    if (fileRef.current) fileRef.current.value = "";
   }
 
   function toggleSort(key: keyof RouteRow) {
@@ -210,27 +183,24 @@ export default function AnalizaPage() {
   }
 
   const sorted = [...rows].sort((a, b) => {
-    const av = a[sortKey];
-    const bv = b[sortKey];
+    const av = a[sortKey]; const bv = b[sortKey];
     if (typeof av === "number" && typeof bv === "number")
       return sortDesc ? bv - av : av - bv;
-    return 0;
+    return String(av).localeCompare(String(bv));
   });
 
   const SortIcon = ({ k }: { k: keyof RouteRow }) =>
     sortKey === k ? <span className="ml-1">{sortDesc ? "↓" : "↑"}</span> : null;
 
-  // Summary stats
-  const profitable = rows.filter(r => r.marginPct >= 15).length;
-  const lowMargin = rows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
-  const breakeven = rows.filter(r => r.marginPct >= 0 && r.marginPct < 5).length;
-  const losses = rows.filter(r => r.marginPct < 0).length;
-  const avgMargin = rows.length > 0
-    ? Math.round(rows.reduce((s, r) => s + r.marginPct, 0) / rows.length * 10) / 10
-    : 0;
+  const profitable  = rows.filter(r => r.marginPct >= 15).length;
+  const lowMargin   = rows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
+  const breakeven   = rows.filter(r => r.marginPct >= 0 && r.marginPct < 5).length;
+  const losses      = rows.filter(r => r.marginPct < 0).length;
   const totalFreight = rows.reduce((s, r) => s + r.frachtEur, 0);
-  const totalCosts = rows.reduce((s, r) => s + r.totalCost, 0);
-  const totalMargin = totalFreight - totalCosts;
+  const totalCosts   = rows.reduce((s, r) => s + r.totalCost, 0);
+  const totalMargin  = totalFreight - totalCosts;
+  const avgMargin    = rows.length > 0
+    ? Math.round(rows.reduce((s, r) => s + r.marginPct, 0) / rows.length * 10) / 10 : 0;
 
   const colorMap: Record<string, string> = {
     emerald: "bg-emerald-100 text-emerald-800",
@@ -238,21 +208,19 @@ export default function AnalizaPage() {
     orange: "bg-orange-100 text-orange-800",
     red: "bg-red-100 text-red-800",
   };
-
   const borderMap: Record<string, string> = {
-    emerald: "border-l-4 border-emerald-500",
-    amber: "border-l-4 border-amber-500",
-    orange: "border-l-4 border-orange-500",
-    red: "border-l-4 border-red-500",
+    emerald: "border-l-4 border-emerald-400",
+    amber: "border-l-4 border-amber-400",
+    orange: "border-l-4 border-orange-400",
+    red: "border-l-4 border-red-400",
   };
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-bold text-slate-800">Analiza rentowności tras</h1>
         <p className="text-sm text-slate-500 mt-1">
-          Wgraj plik z trasami (format TMS) — kalkulator wyliczy koszty i marżę dla każdej trasy
+          Wgraj plik z trasami (eksport TMS) — kalkulator wyliczy koszty i marżę dla każdej trasy
         </p>
       </div>
 
@@ -261,42 +229,24 @@ export default function AnalizaPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div>
             <label className="label">Cena paliwa (EUR/l)</label>
-            <input
-              type="number"
-              step="0.01"
-              min="0.8"
-              max="2.5"
-              value={fuelPrice}
-              onChange={e => setFuelPrice(parseFloat(e.target.value) || 1.25)}
-              className="input-field"
-            />
+            <input type="number" step="0.01" min="0.8" max="2.5"
+              value={fuelPrice} onChange={e => setFuelPrice(parseFloat(e.target.value) || 1.25)}
+              className="input-field" />
           </div>
           <div>
             <label className="label">Kurs PLN/EUR</label>
-            <input
-              type="number"
-              step="0.01"
-              min="3.5"
-              max="5.0"
-              value={eurRate}
-              onChange={e => setEurRate(parseFloat(e.target.value) || 4.27)}
-              className="input-field"
-            />
+            <input type="number" step="0.01" min="3.5" max="5.0"
+              value={eurRate} onChange={e => setEurRate(parseFloat(e.target.value) || 4.27)}
+              className="input-field" />
           </div>
           <div className="flex flex-col justify-end">
             <label className="label">Plik z trasami (XLS/XLSX)</label>
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".xls,.xlsx"
-              onChange={handleFile}
-              disabled={loading}
+            <input ref={fileRef} type="file" accept=".xls,.xlsx"
+              onChange={handleFile} disabled={loading}
               className="block w-full text-sm text-slate-500
-                file:mr-4 file:py-2 file:px-4 file:rounded-lg
-                file:border-0 file:text-sm file:font-semibold
-                file:bg-blue-50 file:text-blue-700
-                hover:file:bg-blue-100 cursor-pointer"
-            />
+                file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0
+                file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700
+                hover:file:bg-blue-100 cursor-pointer" />
           </div>
         </div>
 
@@ -306,9 +256,19 @@ export default function AnalizaPage() {
             Analizuję {filename}…
           </div>
         )}
+        {error && (
+          <div className="mt-3 p-3 bg-red-50 rounded-lg text-red-700 text-sm">
+            <strong>Błąd:</strong> {error}
+          </div>
+        )}
+        {debug && (
+          <div className="mt-3 p-3 bg-slate-50 rounded-lg text-slate-500 text-xs font-mono">
+            {debug}
+          </div>
+        )}
       </div>
 
-      {/* Summary KPIs */}
+      {/* KPI */}
       {rows.length > 0 && (
         <>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -325,7 +285,7 @@ export default function AnalizaPage() {
               <p className="text-3xl font-bold text-orange-600 mt-1">{breakeven}</p>
             </div>
             <div className="card border-l-4 border-red-500">
-              <p className="text-xs text-slate-500 uppercase tracking-wide">Strata &lt;0%</p>
+              <p className="text-xs text-slate-500 uppercase tracking-wide">Strata</p>
               <p className="text-3xl font-bold text-red-600 mt-1">{losses}</p>
             </div>
           </div>
@@ -337,11 +297,15 @@ export default function AnalizaPage() {
             </div>
             <div className="card">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Łączny fracht</p>
-              <p className="text-2xl font-bold text-slate-800 mt-1">{totalFreight.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR</p>
+              <p className="text-2xl font-bold text-slate-800 mt-1">
+                {totalFreight.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR
+              </p>
             </div>
             <div className="card">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Łączne koszty</p>
-              <p className="text-2xl font-bold text-slate-800 mt-1">{totalCosts.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR</p>
+              <p className="text-2xl font-bold text-slate-800 mt-1">
+                {totalCosts.toLocaleString("pl-PL", { maximumFractionDigits: 0 })} EUR
+              </p>
             </div>
             <div className={`card ${totalMargin >= 0 ? "border-l-4 border-emerald-500" : "border-l-4 border-red-500"}`}>
               <p className="text-xs text-slate-500 uppercase tracking-wide">Łączna marża</p>
@@ -354,43 +318,22 @@ export default function AnalizaPage() {
 
           {/* Table */}
           <div className="card overflow-x-auto p-0">
-            <table className="w-full text-sm min-w-[1100px]">
+            <table className="w-full text-sm min-w-[900px]">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Zlecenie</th>
                   <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Trasa</th>
                   <th className="text-left px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Pojazd</th>
-                  <th
-                    className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
-                    onClick={() => toggleSort("distanceKm")}
-                  >
-                    Km <SortIcon k="distanceKm" />
-                  </th>
-                  <th
-                    className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
-                    onClick={() => toggleSort("frachtEur")}
-                  >
-                    Fracht EUR <SortIcon k="frachtEur" />
-                  </th>
-                  <th
-                    className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
-                    onClick={() => toggleSort("totalCost")}
-                  >
-                    Koszty EUR <SortIcon k="totalCost" />
-                  </th>
-                  <th
-                    className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
-                    onClick={() => toggleSort("marginEur")}
-                  >
-                    Marża EUR <SortIcon k="marginEur" />
-                  </th>
-                  <th
-                    className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
-                    onClick={() => toggleSort("marginPct")}
-                  >
-                    Marża % <SortIcon k="marginPct" />
-                  </th>
-                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase">EUR/km</th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("distanceKm")}>Km <SortIcon k="distanceKm" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("frachtEur")}>Fracht EUR <SortIcon k="frachtEur" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("totalCost")}>Koszty EUR <SortIcon k="totalCost" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("marginEur")}>Marża EUR <SortIcon k="marginEur" /></th>
+                  <th className="text-right px-3 py-3 text-xs font-semibold text-slate-500 uppercase cursor-pointer hover:text-slate-800"
+                    onClick={() => toggleSort("marginPct")}>Marża % <SortIcon k="marginPct" /></th>
                   <th className="text-center px-3 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
                 </tr>
               </thead>
@@ -399,30 +342,22 @@ export default function AnalizaPage() {
                   <tr key={r.orderNr} className={`hover:bg-slate-50 ${borderMap[r.labelColor] ?? ""}`}>
                     <td className="px-3 py-2.5">
                       <div className="font-mono text-xs text-slate-700">{r.orderNr}</div>
-                      <div className="text-xs text-slate-400 truncate max-w-[140px]">{r.client}</div>
+                      <div className="text-xs text-slate-400 truncate max-w-[130px]">{r.client}</div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="font-semibold text-slate-800">
-                        {r.originCountry} → {r.destCountry}
-                      </div>
-                      <div className="text-xs text-slate-400 truncate max-w-[160px]">
-                        {r.originCity} → {r.destCity}
-                      </div>
+                      <div className="font-semibold text-slate-800">{r.originCountry} → {r.destCountry}</div>
+                      <div className="text-xs text-slate-400 truncate max-w-[150px]">{r.originCity} → {r.destCity}</div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="font-mono text-xs text-slate-700">{r.vehicle || "—"}</div>
+                      <div className="font-mono text-xs text-slate-700">{r.vehicle}</div>
                       <div className="text-xs text-slate-400">{r.avgFuelL100} l/100</div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
                       {r.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
                     </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <div className="font-semibold text-slate-800">
-                        {r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
-                      </div>
-                      {r.currency === "PLN" && (
-                        <div className="text-xs text-slate-400">{r.frachtRaw}</div>
-                      )}
+                    <td className="px-3 py-2.5 text-right font-semibold text-slate-800">
+                      {r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      {r.currency === "PLN" && <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>}
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
                       {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
@@ -432,14 +367,9 @@ export default function AnalizaPage() {
                     </td>
                     <td className={`px-3 py-2.5 text-right font-bold text-lg ${
                       r.marginPct >= 15 ? "text-emerald-600" :
-                      r.marginPct >= 5 ? "text-amber-600" :
-                      r.marginPct >= 0 ? "text-orange-600" : "text-red-600"
-                    }`}>
+                      r.marginPct >= 5  ? "text-amber-600"   :
+                      r.marginPct >= 0  ? "text-orange-600"  : "text-red-600"}`}>
                       {r.marginPct}%
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-xs text-slate-500">
-                      <div>{r.revenuePerKm} ←</div>
-                      <div>{r.costPerKm} →</div>
                     </td>
                     <td className="px-3 py-2.5 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[r.labelColor] ?? ""}`}>
@@ -451,20 +381,18 @@ export default function AnalizaPage() {
               </tbody>
             </table>
           </div>
-
-          {/* Cost breakdown hint */}
           <p className="text-xs text-slate-400 text-center">
-            Koszty: paliwo (wg Trimble per pojazd) + AdBlue + bieg jałowy + autostrady + kierowca + serwis + leasing · Kurs PLN/EUR: {eurRate}
+            Spalanie pobrane z Trimble per pojazd · Kurs PLN/EUR: {eurRate} · Paliwo: {fuelPrice} EUR/l
           </p>
         </>
       )}
 
-      {!loading && rows.length === 0 && (
+      {!loading && rows.length === 0 && !error && (
         <div className="card text-center py-16">
           <p className="text-4xl mb-3">📋</p>
           <p className="text-slate-600 font-medium">Wgraj plik z trasami aby zobaczyć analizę</p>
           <p className="text-sm text-slate-400 mt-1">
-            Obsługiwany format: eksport TMS z kolumnami Nr pełny, Km, Fracht, Ciągnik, Kraj zał./roz.
+            Format: eksport TMS — kolumny Nr pełny, Km ład. wg. mapy, Fracht z walutą, Ciągnik, Kraj zał./roz.
           </p>
         </div>
       )}
