@@ -30,13 +30,31 @@ export async function POST(req: NextRequest) {
     const fromQuery = originCountry ? `${from}, ${originCountry}` : from;
     const toQuery   = destCountry   ? `${to}, ${destCountry}`     : to;
 
-    const [fromGeo, toGeo] = await Promise.all([
+    // Primary geocoding with country qualification
+    let [fromGeo, toGeo] = await Promise.all([
       geocodeCity(fromQuery),
       geocodeCity(toQuery),
     ]);
 
-    if (!fromGeo || !toGeo) {
-      return NextResponse.json({ error: "Nie znaleziono miasta" }, { status: 400 });
+    // Fallback: try without country restriction for small localities not in OSM with country tag
+    if (!fromGeo && originCountry) {
+      fromGeo = await geocodeCity(from);
+    }
+    if (!toGeo && destCountry) {
+      toGeo = await geocodeCity(to);
+    }
+
+    if (!fromGeo) {
+      return NextResponse.json(
+        { error: `Miasto nie znalezione w OSM: ${from}${originCountry ? ` (${originCountry})` : ""}` },
+        { status: 400 }
+      );
+    }
+    if (!toGeo) {
+      return NextResponse.json(
+        { error: `Miasto nie znalezione w OSM: ${to}${destCountry ? ` (${destCountry})` : ""}` },
+        { status: 400 }
+      );
     }
 
     const orsUrl = new URL("https://api.openrouteservice.org/v2/directions/driving-hgv");
