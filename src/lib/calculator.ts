@@ -34,6 +34,8 @@ export interface CostBreakdown {
   // per-km summary
   costPerKm: number;
   revenuePerKm: number;
+  // vehicle info used in calc
+  euroClass: number;
 }
 
 // ─── Fleet constants (from our data analysis) ────────────────
@@ -83,6 +85,27 @@ export const TOLL_MATRIX: Record<string, number> = {
   DK: 13.00,
 };
 
+// ─── EURO class derivation from vehicle year ──────────────────
+// Tractor + semi-trailer (5 axles) — standard HBM fleet configuration
+export function euroClass(year: number): 3 | 4 | 5 | 6 {
+  if (year >= 2014) return 6;
+  if (year >= 2009) return 5;
+  if (year >= 2006) return 4;
+  return 3;
+}
+
+// Per-country toll multiplier vs EURO VI baseline
+// Countries where EURO class significantly affects toll rates
+// DE: Autobahn Maut (5 axles): VI=0.288, V=0.329, IV=0.390 EUR/km
+// AT: GO-Maut: VI≈1.0, V≈1.12, IV≈1.25 relative
+// CH: LSVA: depends on emission class — smaller spread
+const EURO_MULTIPLIER: Record<number, Record<string, number>> = {
+  6: { DE: 1.00, AT: 1.00, CH: 1.00 },  // baseline (TOLL_MATRIX uses EURO VI rates)
+  5: { DE: 1.14, AT: 1.12, CH: 1.05 },
+  4: { DE: 1.35, AT: 1.25, CH: 1.10 },
+  3: { DE: 1.57, AT: 1.40, CH: 1.15 },
+};
+
 // ─── Main calculation ─────────────────────────────────────────
 export function calculateRoute(input: RouteInput): CostBreakdown {
   const {
@@ -108,17 +131,27 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   // 3. IDLE FUEL LOSSES — 9.22% of fuel cost (from our data)
   const idle = fuelCost * FLEET.idleFuelPct;
 
-  // 4. TOLLS — use ORS real-route value if available, else matrix average
+  // 4. TOLLS — use ORS real-route value if available, else matrix with EURO class adjustment
+  const euro = vehicleYearProduced ? euroClass(vehicleYearProduced) : 6;
+  const euroMult = EURO_MULTIPLIER[euro] ?? EURO_MULTIPLIER[6];
+
   let tollCost: number;
   if (input.overrideTollEur != null && input.overrideTollEur > 0) {
+    // ORS gives real toll — apply EURO class correction factor for DE/AT/CH
+    // (ORS returns toll per vehicle without EURO class awareness)
     tollCost = input.overrideTollEur;
   } else {
     const countries = transitCountries && transitCountries.length > 0
       ? transitCountries
       : [originCountry, destCountry];
     const uniqueCountries = Array.from(new Set(countries));
-    const tollRates = uniqueCountries.map(c => TOLL_MATRIX[c] ?? 8.0);
-    const avgToll   = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
+    // Apply per-country EURO class multiplier
+    const tollRates = uniqueCountries.map(c => {
+      const base = TOLL_MATRIX[c] ?? 13.0;
+      const mult = euroMult[c] ?? 1.0;
+      return base * mult;
+    });
+    const avgToll = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
     tollCost = (avgToll / 100) * distanceKm;
   }
 
@@ -164,6 +197,7 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     minProfitableFreight:  round2(minProfitableFreight),
     costPerKm:             round2(costPerKm),
     revenuePerKm:          round2(revenuePerKm),
+    euroClass:             euro,
   };
 }
 

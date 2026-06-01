@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { calculateRoute, profitabilityLabel, FLEET } from "@/lib/calculator";
+import { calculateRoute, profitabilityLabel, euroClass as deriveEuroClass, FLEET } from "@/lib/calculator";
 
 interface OrsVerification {
   distanceKm: number;
@@ -37,6 +37,7 @@ interface RouteRow {
   totalCost: number;
   label: string;
   labelColor: string;
+  euroClass: number;      // 3 | 4 | 5 | 6 — derived from vehicle year
   ors?: OrsVerification;
 }
 
@@ -204,6 +205,7 @@ export default function AnalizaPage() {
             revenuePerKm: breakdown.revenuePerKm,
             totalCost: breakdown.total,
             label, labelColor: color,
+            euroClass: vehicleYear ? deriveEuroClass(vehicleYear) : 6,
           };
         })
         .filter((r): r is RouteRow => r !== null);
@@ -569,7 +571,18 @@ export default function AnalizaPage() {
                       <div className="text-xs text-slate-400 truncate max-w-[160px]">{r.originCity} → {r.destCity}</div>
                     </td>
                     <td className="px-3 py-2.5">
-                      <div className="font-mono text-xs text-slate-700">{r.vehicle}</div>
+                      <div className="font-mono text-xs text-slate-700 flex items-center gap-1">
+                        {r.vehicle}
+                        <span
+                          className={`inline-block px-1 py-0 rounded text-[10px] font-bold
+                            ${r.euroClass >= 6 ? "bg-emerald-100 text-emerald-700"
+                            : r.euroClass === 5 ? "bg-amber-100 text-amber-700"
+                            : "bg-red-100 text-red-700"}`}
+                          title={`EURO ${r.euroClass} — wpływa na stawkę myto DE/AT/CH`}
+                        >
+                          E{r.euroClass}
+                        </span>
+                      </div>
                       <div className="text-xs text-slate-400">{r.avgFuelL100} l/100</div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
