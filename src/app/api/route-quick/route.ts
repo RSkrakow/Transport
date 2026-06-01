@@ -30,17 +30,21 @@ export async function POST(req: NextRequest) {
     const fromQuery = originCountry ? `${from}, ${originCountry}` : from;
     const toQuery   = destCountry   ? `${to}, ${destCountry}`     : to;
 
-    // Primary geocoding with country qualification
-    let [fromGeo, toGeo] = await Promise.all([
-      geocodeCity(fromQuery),
-      geocodeCity(toQuery),
-    ]);
+    // Sequential geocoding (Nominatim policy: max 1 req/sec)
+    // Each call: primary (city+country), fallback (city only) if null
+    const delay = () => new Promise(r => setTimeout(r, 1100));
 
-    // Fallback: try without country restriction for small localities not in OSM with country tag
+    let fromGeo = await geocodeCity(fromQuery);
     if (!fromGeo && originCountry) {
+      await delay();
       fromGeo = await geocodeCity(from);
     }
+
+    await delay();
+
+    let toGeo = await geocodeCity(toQuery);
     if (!toGeo && destCountry) {
+      await delay();
       toGeo = await geocodeCity(to);
     }
 

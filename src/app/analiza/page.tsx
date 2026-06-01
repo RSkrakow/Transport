@@ -252,8 +252,9 @@ export default function AnalizaPage() {
       setRows([...updatedRows]);
       setVerifyProgress({ done: i + 1, total: routesToVerify.length });
 
-      // Rate limit: 600ms between calls (Nominatim policy)
-      await new Promise(r => setTimeout(r, 600));
+      // Rate limit: route-quick makes 2 sequential Nominatim calls (1.1s each)
+      // Wait 500ms extra after the API response to stay safely under 1 req/sec
+      await new Promise(r => setTimeout(r, 500));
     }
 
     setVerifying(false);
