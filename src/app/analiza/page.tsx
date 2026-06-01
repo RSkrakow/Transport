@@ -3,7 +3,7 @@
 import { useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
-import { calculateRoute, profitabilityLabel, FLEET, TOLL_MATRIX } from "@/lib/calculator";
+import { calculateRoute, profitabilityLabel, FLEET } from "@/lib/calculator";
 
 interface RouteRow {
   orderNr: string;
@@ -91,10 +91,30 @@ export default function AnalizaPage() {
       const wb = XLSX.read(ab, { type: "array", cellDates: true });
       const ws = wb.Sheets[wb.SheetNames[0]];
 
-      // Skip row 0 (group headers), use row 1 as column names
-      const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+      // Read all rows as arrays first, then detect header row
+      const allRows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
+        header: 1,
         defval: null,
-        range: 1,
+      }) as unknown[][];
+
+      // Find the header row — it's the first row that contains "Nr pełny" or "Stan"
+      let headerIdx = 0;
+      for (let i = 0; i < Math.min(5, allRows.length); i++) {
+        const r = allRows[i] as unknown[];
+        if (r.some(c => String(c ?? "").includes("Nr") || String(c ?? "").includes("Stan"))) {
+          headerIdx = i;
+          break;
+        }
+      }
+
+      const headers = (allRows[headerIdx] as unknown[]).map(h => String(h ?? "").trim());
+      const dataRows = allRows.slice(headerIdx + 1);
+
+      // Convert to named-key objects
+      const rawRows: Record<string, unknown>[] = dataRows.map(row => {
+        const obj: Record<string, unknown> = {};
+        headers.forEach((h, i) => { obj[h] = (row as unknown[])[i]; });
+        return obj;
       });
 
       const computed: RouteRow[] = rawRows
