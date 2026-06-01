@@ -290,19 +290,19 @@ export default function AnalizaPage() {
     else { setSortKey(key); setSortDesc(key === "marginPct" ? false : true); }
   }
 
-  const sorted = [...displayRows].sort((a, b) => {
-    const av = a[sortKey]; const bv = b[sortKey];
-    if (typeof av === "number" && typeof bv === "number")
-      return sortDesc ? bv - av : av - bv;
-    return String(av).localeCompare(String(bv));
-  });
-
   const SortIcon = ({ k }: { k: keyof RouteRow }) =>
     sortKey === k ? <span className="ml-1">{sortDesc ? "↓" : "↑"}</span> : null;
 
   const estimatedCount = rows.filter(r => r.frachtEstimated).length;
   const noFreightCount = rows.filter(r => r.frachtEur === 0 && !r.frachtEstimated).length;
   const displayRows    = hideEstimated ? rows.filter(r => !r.frachtEstimated) : rows;
+
+  const sorted = [...displayRows].sort((a, b) => {
+    const av = a[sortKey]; const bv = b[sortKey];
+    if (typeof av === "number" && typeof bv === "number")
+      return sortDesc ? bv - av : av - bv;
+    return String(av).localeCompare(String(bv));
+  });
 
   const profitable  = displayRows.filter(r => r.marginPct >= 15).length;
   const lowMargin   = displayRows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
