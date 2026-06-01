@@ -52,7 +52,6 @@ const ISO_NUMERIC_TO_2: Record<number, string> = {
   826: "GB", // Wielka Brytania
   804: "UA", // Ukraina
   112: "BY", // Białoruś
-  703: "SK", // Słowacja
 };
 
 const COUNTRY_NAMES: Record<string, string> = {
