@@ -86,7 +86,8 @@ export async function calculateRoute(
   to: GeoPoint,
   apiKey: string
 ): Promise<RouteResult> {
-  const url = "https://api.openrouteservice.org/v2/directions/driving-hgv";
+  // /geojson suffix returns GeoJSON geometry (coordinates as [[lon,lat], ...])
+  const url = "https://api.openrouteservice.org/v2/directions/driving-hgv/geojson";
 
   const body = {
     coordinates: [
@@ -96,7 +97,6 @@ export async function calculateRoute(
     extra_info: ["countryinfo"],
     units: "km",
     instructions: false,
-    geometry_format: "geojson",  // returns coordinates as [[lon,lat], ...]
   };
 
   try {
@@ -116,18 +116,20 @@ export async function calculateRoute(
     }
 
     const data = await res.json();
-    const route = data.routes?.[0];
-    if (!route) return fallbackEstimate(from, to, "Brak trasy w odpowiedzi ORS");
+    // GeoJSON endpoint: data.features[0].properties + data.features[0].geometry
+    const feature = data.features?.[0];
+    if (!feature) return fallbackEstimate(from, to, "Brak trasy w odpowiedzi ORS");
 
-    const distanceKm = route.summary.distance;
-    const durationH  = route.summary.duration / 3600;
+    const props      = feature.properties;
+    const distanceKm = props.summary.distance;
+    const durationH  = props.summary.duration / 3600;
 
     // Geometry: [[lon, lat], [lon, lat], ...]
-    const coords: [number, number][] = route.geometry?.coordinates ?? [];
+    const coords: [number, number][] = feature.geometry?.coordinates ?? [];
 
     // countryinfo.values: [[startIdx, endIdx, orsCode], ...]
     // countryinfo.summary: [{value: orsCode, distance: ?, amount: pct}, ...]
-    const countryInfo = route.extras?.countryinfo;
+    const countryInfo = props.extras?.countryinfo;
     const values: Array<[number, number, number]> = countryInfo?.values ?? [];
     const summary: Array<{ value: number; amount: number }> = countryInfo?.summary ?? [];
 
