@@ -30,9 +30,13 @@ interface MaintenanceRow {
   next_inspection_date: string | null;
   last_tire_change_km: number | null;
   tire_interval_km: number;
-  // Naczepa only
+  // Naczepa — date-based intervals
   brake_check_km: number | null;
   brake_check_interval_km: number;
+  last_brake_check_date: string | null;
+  brake_check_interval_months: number;
+  last_tire_date: string | null;
+  tire_interval_months: number;
   notes: string | null;
 }
 
@@ -42,6 +46,19 @@ type VehicleTab = "ciągnik" | "naczepa" | "all";
 function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null;
   return Math.round((new Date(dateStr).getTime() - Date.now()) / 86400000);
+}
+// Next date = last date + N months
+function nextDateFromInterval(lastDate: string | null, months: number): number | null {
+  if (!lastDate) return null;
+  const next = new Date(lastDate);
+  next.setMonth(next.getMonth() + months);
+  return Math.round((next.getTime() - Date.now()) / 86400000);
+}
+function nextDateStr(lastDate: string | null, months: number): string | null {
+  if (!lastDate) return null;
+  const next = new Date(lastDate);
+  next.setMonth(next.getMonth() + months);
+  return next.toLocaleDateString("pl-PL");
 }
 function kmRem(lastKm: number | null, interval: number, currentKm: number | null): number | null {
   if (lastKm == null || currentKm == null) return null;
@@ -116,6 +133,8 @@ const DEFAULT_CIAGNIK: Omit<MaintenanceRow, "vehicle_reg" | "vehicle_type"> = {
   service_interval_km: 100000, service_interval_months: 12,
   last_tire_change_km: null, tire_interval_km: 120000,
   brake_check_km: null, brake_check_interval_km: 60000,
+  last_brake_check_date: null, brake_check_interval_months: 6,
+  last_tire_date: null, tire_interval_months: 12,
   notes: null,
 };
 const DEFAULT_NACZEPA: Omit<MaintenanceRow, "vehicle_reg" | "vehicle_type"> = {
@@ -126,6 +145,8 @@ const DEFAULT_NACZEPA: Omit<MaintenanceRow, "vehicle_reg" | "vehicle_type"> = {
   service_interval_km: 999999, service_interval_months: 99,
   last_tire_change_km: null, tire_interval_km: 150000,
   brake_check_km: null, brake_check_interval_km: 60000,
+  last_brake_check_date: null, brake_check_interval_months: 6,
+  last_tire_date: null, tire_interval_months: 12,
   notes: null,
 };
 
@@ -352,15 +373,18 @@ export default function SerwisPage() {
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="py-12 text-center text-slate-400 text-sm">Brak pojazdów</td></tr>
             ) : filtered.map(r => {
+              const ciagnik = isCiagnik(r);
+              // Ciągnik — km based
               const oilRem  = kmRem(r.last_oil_change_km, r.oil_change_interval_km, r.current_km);
               const srvRem  = kmRem(r.last_service_km, r.service_interval_km, r.current_km);
-              const tireRem = kmRem(r.last_tire_change_km, r.tire_interval_km, r.current_km);
-              const brkRem  = kmRem(r.brake_check_km, r.brake_check_interval_km, r.current_km);
+              const tireRemKm = kmRem(r.last_tire_change_km, r.tire_interval_km, r.current_km);
               const inspDays = daysUntil(r.next_inspection_date);
-              const ciagnik = isCiagnik(r);
+              // Naczepa — date based
+              const tireDays = nextDateFromInterval(r.last_tire_date, r.tire_interval_months);
+              const brkDays  = nextDateFromInterval(r.last_brake_check_date, r.brake_check_interval_months);
               const allLevels = ciagnik
-                ? [kmLevel(oilRem), dayLevel(inspDays), kmLevel(srvRem), kmLevel(tireRem)]
-                : [dayLevel(inspDays), kmLevel(tireRem), kmLevel(brkRem)];
+                ? [kmLevel(oilRem), dayLevel(inspDays), kmLevel(srvRem), kmLevel(tireRemKm)]
+                : [dayLevel(inspDays), dayLevel(tireDays), dayLevel(brkDays)];
               const worst = worstLevel(allLevels);
               return (
                 <tr key={r.vehicle_reg} className={`hover:bg-slate-50 ${rowBorder[worst]}`}>
@@ -402,14 +426,19 @@ export default function SerwisPage() {
                     )}
                   </td>
                   <td className="px-3 py-2.5 text-center">
-                    <Badge level={kmLevel(tireRem)} text={fmtRem(tireRem)} />
-                    {r.last_tire_change_km && <div className="text-xs text-slate-400 mt-0.5">{fmtKm(r.last_tire_change_km)} km</div>}
+                    {ciagnik ? <>
+                      <Badge level={kmLevel(tireRemKm)} text={fmtRem(tireRemKm)} />
+                      {r.last_tire_change_km && <div className="text-xs text-slate-400 mt-0.5">{fmtKm(r.last_tire_change_km)} km</div>}
+                    </> : <>
+                      <Badge level={dayLevel(tireDays)} text={fmtDays(tireDays)} />
+                      {r.last_tire_date && <div className="text-xs text-slate-400 mt-0.5">{nextDateStr(r.last_tire_date, r.tire_interval_months)}</div>}
+                    </>}
                   </td>
                   {(tab === "naczepa" || tab === "all") && (
                     <td className="px-3 py-2.5 text-center">
                       {!ciagnik ? <>
-                        <Badge level={kmLevel(brkRem, 10000, 5000)} text={fmtRem(brkRem)} />
-                        {r.brake_check_km && <div className="text-xs text-slate-400 mt-0.5">{fmtKm(r.brake_check_km)} km</div>}
+                        <Badge level={dayLevel(brkDays)} text={fmtDays(brkDays)} />
+                        {r.last_brake_check_date && <div className="text-xs text-slate-400 mt-0.5">{nextDateStr(r.last_brake_check_date, r.brake_check_interval_months)}</div>}
                       </> : <span className="text-slate-300 text-xs">—</span>}
                     </td>
                   )}
@@ -536,21 +565,39 @@ export default function SerwisPage() {
                 </label>
               </>}
 
-              {/* Brakes — naczepa only */}
+              {/* Naczepa — date-based opony + hamulce */}
               {!isCiagnik(editRow) && <>
                 <div className="col-span-2 border-t pt-3">
-                  <p className="text-xs font-bold text-orange-600 uppercase tracking-wide mb-2">🛑 Kontrola hamulców</p>
+                  <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">🏎 Opony naczepy (datowo)</p>
                 </div>
                 <label className="block">
-                  <span className="text-xs text-slate-500">Ostatnia kontrola (km)</span>
-                  <input type="number" value={editRow.brake_check_km ?? ""}
-                    onChange={e => setEditRow({...editRow, brake_check_km: e.target.value ? +e.target.value : null})}
+                  <span className="text-xs text-slate-500">Data ostatniej wymiany</span>
+                  <input type="date" value={editRow.last_tire_date ?? ""}
+                    onChange={e => setEditRow({...editRow, last_tire_date: e.target.value || null})}
                     className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </label>
                 <label className="block">
-                  <span className="text-xs text-slate-500">Interwał (km)</span>
-                  <input type="number" value={editRow.brake_check_interval_km}
-                    onChange={e => setEditRow({...editRow, brake_check_interval_km: +e.target.value})}
+                  <span className="text-xs text-slate-500">Interwał (miesiące)</span>
+                  <input type="number" value={editRow.tire_interval_months}
+                    onChange={e => setEditRow({...editRow, tire_interval_months: +e.target.value})}
+                    placeholder="12"
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </label>
+
+                <div className="col-span-2 border-t pt-3">
+                  <p className="text-xs font-bold text-orange-600 uppercase tracking-wide mb-2">🛑 Kontrola hamulców (datowo)</p>
+                </div>
+                <label className="block">
+                  <span className="text-xs text-slate-500">Data ostatniej kontroli</span>
+                  <input type="date" value={editRow.last_brake_check_date ?? ""}
+                    onChange={e => setEditRow({...editRow, last_brake_check_date: e.target.value || null})}
+                    className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                </label>
+                <label className="block">
+                  <span className="text-xs text-slate-500">Interwał (miesiące)</span>
+                  <input type="number" value={editRow.brake_check_interval_months}
+                    onChange={e => setEditRow({...editRow, brake_check_interval_months: +e.target.value})}
+                    placeholder="6"
                     className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
                 </label>
               </>}
