@@ -14,7 +14,9 @@ export interface RouteInput {
   freightEur: number;
   transitCountries?: string[];     // incl. origin & dest for toll calc
   overrideTollEur?: number;        // from ORS real-route calculation (replaces matrix)
-  leasingEurMo?: number;           // vehicle-specific if known
+  leasingEurMo?: number;           // vehicle-specific netto EUR/mo
+  insuranceEurMo?: number;         // OC+AC EUR/mo per vehicle (from Supabase)
+  serviceCostKmOverride?: number;  // EUR/km override per vehicle (from Supabase)
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
 }
@@ -23,6 +25,7 @@ export interface CostBreakdown {
   fuel: number;
   adblue: number;
   toll: number;
+  insurance: number;
   driver: number;
   leasing: number;
   service: number;
@@ -54,6 +57,8 @@ export const FLEET = {
   avgKmPerMonth:        11_667,   // 140k km/yr
   idleFuelPct:          0.021,    // 2.1% idle losses (Trimble FMS Jan-May 2026)
   adblueRatePct:        0.035,    // AdBlue = 3.5% of diesel volume
+  // Insurance default: avg fleet (OC 6531 PLN + AC 3053 PLN @ 4.25 PLN/EUR) / 12
+  insuranceEurMo:       188.0,    // EUR/mies. fleet avg OC+AC
 } as const;
 
 // ─── Toll matrix EUR/100km (calibrated from real TMS fleet data 2025-2026) ─
@@ -158,11 +163,10 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   // 5. DRIVER — agencja pracy: 4 700 EUR brutto/mies. → 3 821 EUR netto/mies. → 0.3275 EUR/km
   const driverCost = FLEET.driverCostPerKm * distanceKm;
 
-  // 6. SERVICE — new vs old vehicle tier
+  // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
   const isNewVehicle = vehicleYearProduced ? vehicleYearProduced >= 2022 : false;
-  const serviceCostKm = isNewVehicle
-    ? FLEET.serviceCostNewKm
-    : FLEET.serviceCostOldKm;
+  const serviceCostKm = input.serviceCostKmOverride
+    ?? (isNewVehicle ? FLEET.serviceCostNewKm : FLEET.serviceCostOldKm);
   const serviceCost = serviceCostKm * distanceKm;
 
   // 7. LEASING — pro-rata per km
@@ -171,8 +175,13 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   const leasingPerKm = leasingMo / FLEET.avgKmPerMonth;
   const leasingCost  = leasingPerKm * distanceKm;
 
+  // 8. INSURANCE (OC+AC) — pro-rata per km from Supabase per vehicle
+  // Fleet default: avg 188 EUR/mies. (6 531 PLN OC + 3 053 PLN AC @ 4.25)
+  const insuranceMo = input.insuranceEurMo ?? FLEET.insuranceEurMo;
+  const insuranceCost = (insuranceMo / FLEET.avgKmPerMonth) * distanceKm;
+
   // ─── Totals ───────────────────────────────────────────────
-  const total = fuelCost + adblue + idle + tollCost + driverCost + serviceCost + leasingCost;
+  const total = fuelCost + adblue + idle + tollCost + driverCost + serviceCost + leasingCost + insuranceCost;
 
   const marginEur = freightEur - total;
   const marginPct = freightEur > 0 ? (marginEur / freightEur) * 100 : 0;
@@ -189,9 +198,10 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     idle:    round2(idle),
     toll:    round2(tollCost),
     driver:  round2(driverCost),
-    service: round2(serviceCost),
-    leasing: round2(leasingCost),
-    total:   round2(total),
+    service:   round2(serviceCost),
+    leasing:   round2(leasingCost),
+    insurance: round2(insuranceCost),
+    total:     round2(total),
     marginEur:             round2(marginEur),
     marginPct:             round2(marginPct),
     minProfitableFreight:  round2(minProfitableFreight),

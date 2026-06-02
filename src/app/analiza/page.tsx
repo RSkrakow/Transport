@@ -103,17 +103,21 @@ export default function AnalizaPage() {
     try {
       const { data: vehicles, error: dbErr } = await supabase
         .from("vehicles")
-        .select("reg, avg_fuel_l100, year_produced, leasing_eur_mo");
+        .select("reg, avg_fuel_l100, year_produced, leasing_eur_mo, insurance_eur_mo, service_cost_km");
 
       if (dbErr) setDebug(`DB warning: ${dbErr.message}`);
 
-      const fuelMap: Record<string, number> = {};
-      const yearMap: Record<string, number> = {};
-      const leasingMap: Record<string, number> = {};
+      const fuelMap:      Record<string, number> = {};
+      const yearMap:      Record<string, number> = {};
+      const leasingMap:   Record<string, number> = {};
+      const insuranceMap: Record<string, number> = {};
+      const serviceMap:   Record<string, number> = {};
       for (const v of vehicles ?? []) {
-        if (v.reg && v.avg_fuel_l100) fuelMap[v.reg] = Number(v.avg_fuel_l100);
-        if (v.reg && v.year_produced) yearMap[v.reg] = Number(v.year_produced);
-        if (v.reg && v.leasing_eur_mo) leasingMap[v.reg] = Number(v.leasing_eur_mo);
+        if (v.reg && v.avg_fuel_l100)    fuelMap[v.reg]      = Number(v.avg_fuel_l100);
+        if (v.reg && v.year_produced)    yearMap[v.reg]      = Number(v.year_produced);
+        if (v.reg && v.leasing_eur_mo)   leasingMap[v.reg]   = Number(v.leasing_eur_mo);
+        if (v.reg && v.insurance_eur_mo) insuranceMap[v.reg] = Number(v.insurance_eur_mo);
+        if (v.reg && v.service_cost_km)  serviceMap[v.reg]   = Number(v.service_cost_km);
       }
 
       const ab = await file.arrayBuffer();
@@ -159,9 +163,11 @@ export default function AnalizaPage() {
           const originCity = get(row, "zał. miasto", "zal. miasto");
           const destCity   = get(row, "roz. miasto");
 
-          const avgFuelL100  = fuelMap[vehicle] ?? FLEET.avgFuelL100;
-          const vehicleYear  = yearMap[vehicle];
-          const leasingEurMo = leasingMap[vehicle];
+          const avgFuelL100    = fuelMap[vehicle]      ?? FLEET.avgFuelL100;
+          const vehicleYear    = yearMap[vehicle];
+          const leasingEurMo   = leasingMap[vehicle];
+          const insuranceEurMo = insuranceMap[vehicle];
+          const serviceCostKmOverride = serviceMap[vehicle];
 
           // TMS own margin/km — "Marża EUR na 1 KM z mapy"
           const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
@@ -185,6 +191,7 @@ export default function AnalizaPage() {
               fuelPriceEurL: fuelPrice, freightEur: 1,
               transitCountries: [originCountry, destCountry],
               avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+              insuranceEurMo, serviceCostKmOverride,
               overrideTollEur: tmsTollEur || undefined,
             });
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
@@ -197,6 +204,7 @@ export default function AnalizaPage() {
             freightEur: frachtEur,
             transitCountries: [originCountry, destCountry],
             avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+            insuranceEurMo, serviceCostKmOverride,
             overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
           });
 
