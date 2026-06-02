@@ -148,14 +148,25 @@ export default function SerwisPage() {
         return;
       }
 
-      const updates: Record<string, number> = {};
-      for (const row of all.slice(hIdx + 1)) {
-        const reg = String(row[regIdx] ?? "").trim().toUpperCase();
-        const km  = parseFloat(String(row[kmIdx] ?? "").replace(/\s/g, "").replace(",", "."));
-        if (reg && !isNaN(km) && km > 0) updates[reg] = km;
+      // Trimble: vehicle name format is "DW1VR31_T4U" or "DW1VR31_Tablet"
+      // Strip suffix after last underscore-letter combo to get base reg
+      function stripTrimbleSuffix(name: string): string {
+        // Remove known suffixes: _T4U, _Tablet, _FMS, _GPS, _TMS, _TAB
+        return name.replace(/_(T4U|TABLET|FMS|GPS|TMS|TAB|DEMO)$/i, "").trim();
       }
 
-      // Upsert to maintenance table
+      // Collect MAX km per base registration (multiple devices per vehicle)
+      const updates: Record<string, number> = {};
+      for (const row of all.slice(hIdx + 1)) {
+        const rawName = String(row[regIdx] ?? "").trim().toUpperCase();
+        const reg = stripTrimbleSuffix(rawName);
+        const km  = parseFloat(String(row[kmIdx] ?? "").replace(/\s/g, "").replace(",", "."));
+        if (reg && !isNaN(km) && km > 100) {  // ignore < 100km (demo/invalid)
+          updates[reg] = Math.max(updates[reg] ?? 0, Math.round(km));
+        }
+      }
+
+      // Upsert to maintenance table + update vehicles.odometer_km
       const now = new Date().toISOString();
       let updated = 0;
       for (const [reg, km] of Object.entries(updates)) {
@@ -163,6 +174,8 @@ export default function SerwisPage() {
           { vehicle_reg: reg, current_km: km, current_km_updated_at: now },
           { onConflict: "vehicle_reg" }
         );
+        // Also update odometer in vehicles table
+        await supabase.from("vehicles").update({ odometer_km: km }).eq("reg", reg);
         updated++;
       }
 
