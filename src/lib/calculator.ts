@@ -17,6 +17,7 @@ export interface RouteInput {
   leasingEurMo?: number;           // vehicle-specific netto EUR/mo
   insuranceEurMo?: number;         // OC+AC EUR/mo per vehicle (from Supabase)
   serviceCostKmOverride?: number;  // EUR/km override per vehicle (from Supabase)
+  avgKmPerMonthActual?: number;    // actual monthly km from Trimble/Supabase (for driver cost pro-rating)
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
 }
@@ -44,17 +45,20 @@ export interface CostBreakdown {
 // ─── Fleet constants (from our data analysis) ────────────────
 export const FLEET = {
   avgFuelL100:          27.80,    // Trimble FMS, 55 vehicles, Jan-May 2026
-  // Driver cost: agencja pracy 4 700 EUR brutto/kierowcę/mies. (faktura + 23% VAT)
-  // Netto = 4 700 / 1.23 = 3 821 EUR/mies. (VAT odliczany)
-  // Per km = 3 821 / 11 667 = 0.3275 EUR/km
-  driverCostEurMoGross: 4_700,    // EUR brutto (z VAT 23%) — faktura agencji pracy
-  driverCostEurMoNet:   3_821,    // EUR netto (po odliczeniu VAT 23%)
-  driverCostPerKm:      0.3275,   // 3 821 EUR / 11 667 km/mies.
+  // ── Driver + administration cost ────────────────────────────
+  // Model A (fixed monthly): 4 700 EUR brutto/mies. (agencja pracy, z VAT 23%)
+  //   → netto = 4 700 / 1.23 = 3 821 EUR/mies.
+  //   → per km = 3 821 / actual_km_month (per vehicle from Supabase avg_km_month)
+  // Model B (flat per km):   0.39 EUR/km  ← accepted rate niezależnie od km/mies.
+  //   Both models give similar results at ~9 800 km/mies.
+  driverCostEurMoGross:  4_700,   // EUR brutto (agencja pracy + VAT 23%)
+  driverCostEurMoNet:    3_821,   // EUR netto (po odliczeniu VAT)
+  driverCostPerKmFlat:   0.39,    // EUR/km — flat rate (Model B)
   serviceCostNewKm:     0.009,    // MAN TGX 2023-2024
   serviceCostOldKm:     0.020,    // MAN TGX 2018-2019, DAF XF 2019
   leasingNewEurMo:      733.33,   // ~8,800 EUR/yr
   leasingOldEurMo:      520.83,   // ~6,250 EUR/yr
-  avgKmPerMonth:        11_667,   // 140k km/yr
+  avgKmPerMonth:        11_667,   // 140k km/yr fleet default (used if vehicle-specific unknown)
   idleFuelPct:          0.021,    // 2.1% idle losses (Trimble FMS Jan-May 2026)
   adblueRatePct:        0.035,    // AdBlue = 3.5% of diesel volume
   // Insurance default: avg fleet (OC 6531 PLN + AC 3053 PLN @ 4.25 PLN/EUR) / 12
@@ -160,8 +164,19 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     tollCost = (avgToll / 100) * distanceKm;
   }
 
-  // 5. DRIVER — agencja pracy: 4 700 EUR brutto/mies. → 3 821 EUR netto/mies. → 0.3275 EUR/km
-  const driverCost = FLEET.driverCostPerKm * distanceKm;
+  // 5. DRIVER — two models, both give same result at breakeven ~9 800 km/mies.
+  // Model A (fixed monthly): 3 821 EUR netto / actual_km_month × route_km
+  // Model B (flat rate):     0.39 EUR/km × route_km
+  // Use Model A when actual monthly km known, else Model B as fallback
+  let driverCost: number;
+  const actualKmMo = input.avgKmPerMonthActual;
+  if (actualKmMo && actualKmMo > 500) {
+    // Model A: fixed monthly pro-rated by actual vehicle km/month
+    driverCost = (FLEET.driverCostEurMoNet / actualKmMo) * distanceKm;
+  } else {
+    // Model B: flat 0.39 EUR/km
+    driverCost = FLEET.driverCostPerKmFlat * distanceKm;
+  }
 
   // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
   const isNewVehicle = vehicleYearProduced ? vehicleYearProduced >= 2022 : false;
