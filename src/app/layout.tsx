@@ -66,6 +66,12 @@ export default function RootLayout({
                   Ubezpieczenia
                 </Link>
                 <Link
+                  href="/dyspozytorzy"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  Dyspozytorzy
+                </Link>
+                <Link
                   href="/serwis"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >
