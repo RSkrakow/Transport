@@ -36,6 +36,7 @@ interface CostBreakdownDetail {
 
 interface RouteMetric {
   orderNr: string;
+  client: string;
   vehicle: string;
   dispatcher_id: string | null;
   dispatcherName: string;
@@ -204,6 +205,7 @@ export default function DyspozytorzyPage() {
       if (frachtEur === 0) continue;
 
       const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+      const client  = get(row, "zleceniodawca", "klient", "nadawca") || "—";
       const originCountry = get(row, "zał. kraj", "zal. kraj", "kraj za").toUpperCase() || "PL";
       const destCountry   = get(row, "roz. kraj", "kraj ro").toUpperCase() || "PL";
 
@@ -242,7 +244,7 @@ export default function DyspozytorzyPage() {
 
       const disp_id = dispMap[vehicle] ?? null;
       metrics.push({
-        orderNr, vehicle,
+        orderNr, client, vehicle,
         dispatcher_id: disp_id,
         dispatcherName: disp_id ? (dispNameMap[disp_id] ?? "—") : "Nieprzypisany",
         originCountry, destCountry, distanceKm,
@@ -346,8 +348,31 @@ export default function DyspozytorzyPage() {
       ],
     ];
     const ws1 = XLSX.utils.aoa_to_sheet(summaryData);
-    ws1["!cols"] = [16,8,6,12,14,12,8,10,8,7,10,10].map(w => ({ wch: w }));
+    ws1["!cols"] = [16,8,8,6,12,14,12,8,10,8,7,10,10].map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(wb2, ws1, "Podsumowanie");
+
+    // Klienci ranking — wszystkie trasy
+    const allR = kpiData.flatMap(d => d.routeList);
+    const clientMap: Record<string, {routes:number;fracht:number;margin:number;losses:number;disp:Set<string>}> = {};
+    for (const r of allR) {
+      if (!clientMap[r.client]) clientMap[r.client] = {routes:0,fracht:0,margin:0,losses:0,disp:new Set()};
+      clientMap[r.client].routes++;
+      clientMap[r.client].fracht += r.frachtEur;
+      clientMap[r.client].margin += r.marginEur;
+      if (r.marginPct < 0) clientMap[r.client].losses++;
+      clientMap[r.client].disp.add(r.dispatcherName);
+    }
+    const clientRows = Object.entries(clientMap)
+      .map(([name, s]) => [name, s.routes, Math.round(s.fracht), Math.round(s.margin),
+        +(s.fracht>0?(s.margin/s.fracht*100):0).toFixed(1), s.losses, [...s.disp].join(", ")])
+      .sort((a,b) => (a[4] as number)-(b[4] as number));
+    const wsC = XLSX.utils.aoa_to_sheet([
+      [`Zleceniodawcy — ${weekLabel}`], [],
+      ["Zleceniodawca","Trasy","Fracht EUR","Marża EUR","Marża %","Straty","Dyspozytorzy"],
+      ...clientRows,
+    ]);
+    wsC["!cols"] = [30,6,12,12,8,7,25].map(w => ({ wch: w }));
+    XLSX.utils.book_append_sheet(wb2, wsC, "Zleceniodawcy");
 
     // Per-dispatcher sheets
     for (const d of kpiData) {
@@ -356,10 +381,11 @@ export default function DyspozytorzyPage() {
         [`${d.name} — Trasy tygodnia ${weekLabel}`],
         [`Razem: ${d.routes} tras | Fracht: ${Math.round(d.frachtEur)} EUR | Marża: ${Math.round(d.marginEur)} EUR (${d.marginPct.toFixed(1)}%)`],
         [],
-        ["Nr zlecenia", "Pojazd", "Trasa", "Km", "Fracht EUR", "Koszty HBM", "Marża EUR", "Marża %", "Status"],
+        ["Nr zlecenia", "Zleceniodawca", "Pojazd", "Trasa", "Km", "Dni", "Fracht EUR", "Koszty HBM", "Marża EUR", "Marża %", "Status"],
         ...d.routeList.map(r => [
-          r.orderNr, r.vehicle,
+          r.orderNr, r.client, r.vehicle,
           `${r.originCountry} → ${r.destCountry}`,
+          Math.round(r.distanceKm), r.routeDays,
           Math.round(r.distanceKm),
           Math.round(r.frachtEur), Math.round(r.totalCost), Math.round(r.marginEur),
           +r.marginPct.toFixed(1), r.label,
@@ -562,8 +588,61 @@ export default function DyspozytorzyPage() {
               )}
 
               {/* Drill-down — selected dispatcher */}
-              {selectedKpi && (
-                <div className="card p-0 overflow-hidden">
+              {selectedKpi && (() => {
+                // Ranking klientów per dyspozytor
+                const clientStats: Record<string, {routes:number;margin:number;losses:number;fracht:number}> = {};
+                for (const r of selectedKpi.routeList) {
+                  if (!clientStats[r.client]) clientStats[r.client] = {routes:0,margin:0,losses:0,fracht:0};
+                  clientStats[r.client].routes++;
+                  clientStats[r.client].margin += r.marginEur;
+                  clientStats[r.client].fracht += r.frachtEur;
+                  if (r.marginPct < 0) clientStats[r.client].losses++;
+                }
+                const clientRank = Object.entries(clientStats)
+                  .map(([name, s]) => ({name, ...s, marginPct: s.fracht>0?(s.margin/s.fracht)*100:0}))
+                  .sort((a,b) => a.marginPct - b.marginPct);
+
+                return (
+                <div className="space-y-3">
+                  {/* Client ranking */}
+                  {clientRank.length > 1 && (
+                    <div className="card p-0 overflow-hidden">
+                      <div className="px-4 py-2.5 bg-slate-50 border-b">
+                        <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">Zleceniodawcy — {selectedKpi.name}</h4>
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-100">
+                          <tr>
+                            <th className="text-left px-4 py-2 text-xs font-semibold text-slate-400 uppercase">Zleceniodawca</th>
+                            <th className="text-right px-3 py-2 text-xs font-semibold text-slate-400 uppercase">Trasy</th>
+                            <th className="text-right px-3 py-2 text-xs font-semibold text-slate-400 uppercase">Fracht</th>
+                            <th className="text-right px-3 py-2 text-xs font-semibold text-slate-400 uppercase">Marża EUR</th>
+                            <th className="text-right px-3 py-2 text-xs font-semibold text-slate-400 uppercase">Marża %</th>
+                            <th className="text-center px-3 py-2 text-xs font-semibold text-slate-400 uppercase">Straty</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {clientRank.map(c => (
+                            <tr key={c.name} className={`hover:bg-slate-50 ${c.losses>0?"bg-red-50/40":c.marginPct>=15?"":"bg-amber-50/20"}`}>
+                              <td className="px-4 py-2 text-xs font-medium text-slate-800 max-w-[200px] truncate">{c.name}</td>
+                              <td className="px-3 py-2 text-right text-xs text-slate-600">{c.routes}</td>
+                              <td className="px-3 py-2 text-right text-xs">{Math.round(c.fracht).toLocaleString("pl-PL")} €</td>
+                              <td className={`px-3 py-2 text-right text-xs font-semibold ${marginColor(c.marginPct)}`}>{Math.round(c.margin).toLocaleString("pl-PL")} €</td>
+                              <td className={`px-3 py-2 text-right text-xs font-bold ${marginColor(c.marginPct)}`}>{fmtPct(c.marginPct)}</td>
+                              <td className="px-3 py-2 text-center">
+                                {c.losses > 0
+                                  ? <span className="text-xs bg-red-100 text-red-700 font-bold px-2 py-0.5 rounded-full">{c.losses} ✗</span>
+                                  : <span className="text-xs text-emerald-500">✓</span>}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Route list */}
+                  <div className="card p-0 overflow-hidden">
                   <div className="px-4 py-3 bg-slate-50 border-b flex items-center justify-between">
                     <h3 className="font-bold text-slate-800">Trasy — {selectedKpi.name}</h3>
                     <button onClick={()=>setSelectedDispatcher(null)} className="text-slate-400 hover:text-slate-700">✕</button>
@@ -572,9 +651,10 @@ export default function DyspozytorzyPage() {
                     <thead className="bg-slate-50 border-b">
                       <tr>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Zlecenie</th>
+                        <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Zleceniodawca</th>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Pojazd</th>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Trasa</th>
-                        <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Km</th>
+                        <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Km/d</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Fracht</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Koszty</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Marża</th>
@@ -587,9 +667,12 @@ export default function DyspozytorzyPage() {
                           onClick={() => setAnalysisRoute(r)}
                           className={`cursor-pointer hover:bg-blue-50/30 ${r.marginPct<0?"bg-red-50/30":""}`}>
                           <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
+                          <td className="px-4 py-2 text-xs text-slate-700 max-w-[140px] truncate" title={r.client}>{r.client}</td>
                           <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
                           <td className="px-4 py-2 text-xs text-slate-600">{r.originCountry}→{r.destCountry}</td>
-                          <td className="px-4 py-2 text-right text-xs">{Math.round(r.distanceKm).toLocaleString("pl-PL")}</td>
+                          <td className="px-4 py-2 text-right text-xs text-slate-500">
+                            {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays}d</span>
+                          </td>
                           <td className="px-4 py-2 text-right text-xs font-medium">{Math.round(r.frachtEur).toLocaleString("pl-PL")}</td>
                           <td className="px-4 py-2 text-right text-xs">{Math.round(r.totalCost).toLocaleString("pl-PL")}</td>
                           <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>
@@ -609,7 +692,9 @@ export default function DyspozytorzyPage() {
                     </tbody>
                   </table>
                 </div>
-              )}
+                </div>
+                );
+              })()}
             </>
           )}
         </div>
@@ -639,6 +724,7 @@ export default function DyspozytorzyPage() {
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Zlecenie</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Zleceniodawca</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Dyspozytor</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Pojazd</th>
                   <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Trasa</th>
@@ -655,6 +741,7 @@ export default function DyspozytorzyPage() {
                     const q = routeSearch.toLowerCase();
                     const searchOk = !q || r.orderNr.toLowerCase().includes(q) ||
                       r.vehicle.toLowerCase().includes(q) || r.dispatcherName.toLowerCase().includes(q) ||
+                      r.client.toLowerCase().includes(q) ||
                       r.originCountry.toLowerCase().includes(q) || r.destCountry.toLowerCase().includes(q);
                     return typeOk && searchOk;
                   })
@@ -664,6 +751,7 @@ export default function DyspozytorzyPage() {
                     return (
                     <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.marginPct<0?"bg-red-50/40":""}`}>
                       <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
+                      <td className="px-4 py-2 text-xs text-slate-700 max-w-[150px] truncate" title={r.client}>{r.client}</td>
                       <td className="px-4 py-2 text-xs font-medium text-slate-700">{r.dispatcherName}</td>
                       <td className="px-4 py-2">
                         <span className="font-mono text-xs font-semibold">{r.vehicle}</span>
@@ -825,7 +913,8 @@ export default function DyspozytorzyPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold">Analiza trasy — {r.orderNr}</h2>
-                  <p className="text-sm opacity-90">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · <span className="font-semibold">{r.routeDays} {r.routeDays === 1 ? "doba" : r.routeDays < 5 ? "doby" : "dób"}</span></p>
+                  <p className="text-sm opacity-90 font-semibold">{r.client}</p>
+                  <p className="text-sm opacity-80">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · {r.routeDays} {r.routeDays === 1 ? "doba" : r.routeDays < 5 ? "doby" : "dób"}</p>
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-black">{fmtPct(r.marginPct)}</div>
