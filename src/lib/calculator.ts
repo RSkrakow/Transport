@@ -17,7 +17,8 @@ export interface RouteInput {
   leasingEurMo?: number;           // vehicle-specific netto EUR/mo
   insuranceEurMo?: number;         // OC+AC EUR/mo per vehicle (from Supabase)
   serviceCostKmOverride?: number;  // EUR/km override per vehicle (from Supabase)
-  avgKmPerMonthActual?: number;    // actual monthly km from Trimble/Supabase (for driver cost pro-rating)
+  avgKmPerMonthActual?: number;    // DEPRECATED — kept for backward compat, ignored if routeDays provided
+  routeDays?: number;              // actual route duration in days (from TMS dates or ceil(km/450))
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
 }
@@ -38,7 +39,8 @@ export interface CostBreakdown {
   // per-km summary
   costPerKm: number;
   revenuePerKm: number;
-  // vehicle info used in calc
+  // route info
+  routeDays: number;   // doby trasy użyte w kalkulacji
   euroClass: number;
 }
 
@@ -53,7 +55,13 @@ export const FLEET = {
   //   Both models give similar results at ~9 800 km/mies.
   driverCostEurMoGross:  4_700,   // EUR brutto (agencja pracy + VAT 23%)
   driverCostEurMoNet:    3_821,   // EUR netto (po odliczeniu VAT)
-  driverCostPerKmFlat:   0.39,    // EUR/km — flat rate (Model B)
+  driverCostPerKmFlat:   0.39,    // EUR/km — flat rate fallback only
+  // ── Model dobowy (rekomendowany) ─────────────────────────────
+  // 3821 EUR netto / 21 dni roboczych = 181.95 EUR/dobę
+  // Doby trasy = z dat TMS lub ceil(km/450 km/dobę limit UE)
+  driverWorkDaysPerMonth: 21,     // dni robocze TIR/mies. (po odpoczynkach tygodniowych)
+  driverDailyCostNet:     181.95, // 3821 / 21 = 181.95 EUR/dobę
+  driverKmPerDay:         450,    // max km/dobę HGV EU (9h × 50 km/h avg)
   serviceCostNewKm:     0.009,    // MAN TGX 2023-2024
   serviceCostOldKm:     0.020,    // MAN TGX 2018-2019, DAF XF 2019
   leasingNewEurMo:      733.33,   // ~8,800 EUR/yr
@@ -164,19 +172,14 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     tollCost = (avgToll / 100) * distanceKm;
   }
 
-  // 5. DRIVER — two models, both give same result at breakeven ~9 800 km/mies.
-  // Model A (fixed monthly): 3 821 EUR netto / actual_km_month × route_km
-  // Model B (flat rate):     0.39 EUR/km × route_km
-  // Use Model A when actual monthly km known, else Model B as fallback
-  let driverCost: number;
-  const actualKmMo = input.avgKmPerMonthActual;
-  if (actualKmMo && actualKmMo > 500) {
-    // Model A: fixed monthly pro-rated by actual vehicle km/month
-    driverCost = (FLEET.driverCostEurMoNet / actualKmMo) * distanceKm;
-  } else {
-    // Model B: flat 0.39 EUR/km
-    driverCost = FLEET.driverCostPerKmFlat * distanceKm;
-  }
+  // 5. DRIVER — Model Dobowy (rekomendowany w transporcie międzynarodowym)
+  // Kierowca kosztuje tyle samo niezależnie od km — płacimy za DOBY pracy.
+  // Dobowy koszt netto = 3 821 EUR / 21 dni roboczych = 181,95 EUR/dobę
+  // Doby trasy: z dat TMS (pickup→delivery) lub ceil(km / 450 km/dobę)
+  const routeDays = input.routeDays && input.routeDays > 0
+    ? input.routeDays
+    : Math.max(1, Math.ceil(distanceKm / FLEET.driverKmPerDay));
+  const driverCost = routeDays * FLEET.driverDailyCostNet;
 
   // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
   const isNewVehicle = vehicleYearProduced ? vehicleYearProduced >= 2022 : false;
@@ -222,6 +225,7 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     minProfitableFreight:  round2(minProfitableFreight),
     costPerKm:             round2(costPerKm),
     revenuePerKm:          round2(revenuePerKm),
+    routeDays,
     euroClass:             euro,
   };
 }

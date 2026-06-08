@@ -170,7 +170,29 @@ export default function AnalizaPage() {
           const leasingEurMo          = leasingMap[vehicle];
           const insuranceEurMo        = insuranceMap[vehicle];
           const serviceCostKmOverride = serviceMap[vehicle];
-          const avgKmPerMonthActual   = kmMonthMap[vehicle]; // → driver cost Model A
+
+          // Route days from TMS dates (pickup → delivery)
+          // Columns: "Podjęcie" (load date) and "Dostarczenie" (delivery date)
+          const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku", "załadunek");
+          const deliveryRaw = get(row, "dostarczenie", "data rozładunku", "rozładunek");
+          let routeDays: number | undefined;
+          if (pickupRaw && deliveryRaw) {
+            const parseDate = (s: string) => {
+              // Handle Excel serial number or date string
+              const n = parseFloat(s);
+              if (!isNaN(n) && n > 40000) {
+                // Excel serial date: days since 1900-01-01
+                return new Date((n - 25569) * 86400 * 1000);
+              }
+              return new Date(s);
+            };
+            const d1 = parseDate(pickupRaw);
+            const d2 = parseDate(deliveryRaw);
+            if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+              const diff = Math.round((d2.getTime() - d1.getTime()) / 86400000);
+              routeDays = Math.max(1, diff + 1); // inclusive days
+            }
+          }
 
           // TMS own margin/km — "Marża EUR na 1 KM z mapy"
           const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
@@ -207,7 +229,7 @@ export default function AnalizaPage() {
             freightEur: frachtEur,
             transitCountries: [originCountry, destCountry],
             avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
-            insuranceEurMo, serviceCostKmOverride, avgKmPerMonthActual,
+            insuranceEurMo, serviceCostKmOverride, routeDays,
             overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
           });
 

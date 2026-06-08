@@ -51,6 +51,7 @@ interface RouteMetric {
   breakdown: CostBreakdownDetail;
   costPerKm: number;
   revenuePerKm: number;
+  routeDays: number;
 }
 
 interface DispatcherKPI {
@@ -210,6 +211,22 @@ export default function DyspozytorzyPage() {
       const tmsTollPln = parseFloat(get(row, "myto na trasie pln") || "0");
       const tmsTollEur = tmsTollPln > 0 ? Math.round((tmsTollPln / eurRate) * 100) / 100 : 0;
 
+      // Route days from TMS dates
+      const parseExcelDate = (s: string) => {
+        const n = parseFloat(s);
+        if (!isNaN(n) && n > 40000) return new Date((n - 25569) * 86400 * 1000);
+        return new Date(s);
+      };
+      const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku");
+      const deliveryRaw = get(row, "dostarczenie", "data rozładunku");
+      let routeDays: number | undefined;
+      if (pickupRaw && deliveryRaw) {
+        const d1 = parseExcelDate(pickupRaw), d2 = parseExcelDate(deliveryRaw);
+        if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
+          routeDays = Math.max(1, Math.round((d2.getTime()-d1.getTime())/86400000) + 1);
+        }
+      }
+
       const bd = calculateRoute({
         originCountry, destCountry, distanceKm,
         fuelPriceEurL: fuelPrice, freightEur: frachtEur,
@@ -219,7 +236,7 @@ export default function DyspozytorzyPage() {
         leasingEurMo: vData?.leasing_eur_mo ?? undefined,
         insuranceEurMo: vData?.insurance_eur_mo ?? undefined,
         serviceCostKmOverride: vData?.service_cost_km ?? undefined,
-        avgKmPerMonthActual: vData?.avg_km_month ?? undefined,
+        routeDays,
         overrideTollEur: tmsTollEur || undefined,
       });
 
@@ -232,6 +249,7 @@ export default function DyspozytorzyPage() {
         frachtEur, totalCost: bd.total, marginEur: bd.marginEur,
         marginPct: bd.marginPct, tollEur: bd.toll,
         label: bd.marginPct >= 15 ? "Rentowna" : bd.marginPct >= 5 ? "Niska marża" : bd.marginPct >= 0 ? "Próg" : "STRATA",
+        routeDays: bd.routeDays,
         breakdown: {
           fuel: bd.fuel, adblue: bd.adblue, idle: bd.idle,
           toll: bd.toll, driver: bd.driver, service: bd.service,
@@ -790,7 +808,7 @@ export default function DyspozytorzyPage() {
         if (bd.toll / r.frachtEur > 0.25)
           diagnoses.push(`Myto stanowi ${(bd.toll/r.frachtEur*100).toFixed(0)}% frachtu — trasa przez drogi kraje (DE/AT/CH/FR)`);
         if (bd.driver / r.frachtEur > 0.35)
-          diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — za mało km na tej trasie`);
+          diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — ${r.routeDays} ${r.routeDays===1?"doba":"doby"} × 181,95 EUR = ${Math.round(bd.driver)} EUR przy frachcie ${Math.round(r.frachtEur)} EUR`);
         if (r.distanceKm < 300)
           diagnoses.push(`Krótka trasa (${Math.round(r.distanceKm)} km) — wysokie koszty stałe (leasing, ubezp.) na małej odległości`);
         if (bd.leasing / r.frachtEur > 0.20)
@@ -807,7 +825,7 @@ export default function DyspozytorzyPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h2 className="text-lg font-bold">Analiza trasy — {r.orderNr}</h2>
-                  <p className="text-sm opacity-90">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km</p>
+                  <p className="text-sm opacity-90">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · <span className="font-semibold">{r.routeDays} {r.routeDays === 1 ? "doba" : r.routeDays < 5 ? "doby" : "dób"}</span></p>
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-black">{fmtPct(r.marginPct)}</div>
