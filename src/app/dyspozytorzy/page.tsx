@@ -28,6 +28,12 @@ interface Vehicle {
   avg_km_month: number | null;
 }
 
+interface CostBreakdownDetail {
+  fuel: number; adblue: number; idle: number;
+  toll: number; driver: number; service: number;
+  leasing: number; insurance: number;
+}
+
 interface RouteMetric {
   orderNr: string;
   vehicle: string;
@@ -42,6 +48,9 @@ interface RouteMetric {
   marginPct: number;
   tollEur: number;
   label: string;
+  breakdown: CostBreakdownDetail;
+  costPerKm: number;
+  revenuePerKm: number;
 }
 
 interface DispatcherKPI {
@@ -101,6 +110,9 @@ export default function DyspozytorzyPage() {
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");
   const [configTypeFilter, setConfigTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");
   const [routeSearch, setRouteSearch] = useState("");
+
+  // Loss analysis modal
+  const [analysisRoute, setAnalysisRoute] = useState<RouteMetric | null>(null);
 
   // Config state
   const [newDispName, setNewDispName] = useState("");
@@ -220,6 +232,13 @@ export default function DyspozytorzyPage() {
         frachtEur, totalCost: bd.total, marginEur: bd.marginEur,
         marginPct: bd.marginPct, tollEur: bd.toll,
         label: bd.marginPct >= 15 ? "Rentowna" : bd.marginPct >= 5 ? "Niska marża" : bd.marginPct >= 0 ? "Próg" : "STRATA",
+        breakdown: {
+          fuel: bd.fuel, adblue: bd.adblue, idle: bd.idle,
+          toll: bd.toll, driver: bd.driver, service: bd.service,
+          leasing: bd.leasing, insurance: bd.insurance,
+        },
+        costPerKm: bd.costPerKm,
+        revenuePerKm: bd.revenuePerKm,
       });
     }
 
@@ -546,7 +565,9 @@ export default function DyspozytorzyPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {selectedKpi.routeList.sort((a,b)=>a.marginPct-b.marginPct).map(r => (
-                        <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.marginPct<0?"bg-red-50/30":""}`}>
+                        <tr key={r.orderNr}
+                          onClick={() => setAnalysisRoute(r)}
+                          className={`cursor-pointer hover:bg-blue-50/30 ${r.marginPct<0?"bg-red-50/30":""}`}>
                           <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
                           <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
                           <td className="px-4 py-2 text-xs text-slate-600">{r.originCountry}→{r.destCountry}</td>
@@ -734,6 +755,172 @@ export default function DyspozytorzyPage() {
           </div>
         </div>
       )}
+      {/* ── Loss Analysis Modal ── */}
+      {analysisRoute && (() => {
+        const r = analysisRoute;
+        const bd = r.breakdown;
+        const costs = [
+          { key: "Paliwo",      val: bd.fuel,      icon: "⛽", color: "bg-orange-500" },
+          { key: "Kierowca",    val: bd.driver,    icon: "👤", color: "bg-blue-500" },
+          { key: "Myto",        val: bd.toll,      icon: "🛣️", color: "bg-purple-500" },
+          { key: "Leasing",     val: bd.leasing,   icon: "💳", color: "bg-teal-500" },
+          { key: "Ubezp.",      val: bd.insurance, icon: "🛡️", color: "bg-indigo-500" },
+          { key: "Serwis",      val: bd.service,   icon: "🔧", color: "bg-slate-500" },
+          { key: "AdBlue",      val: bd.adblue,    icon: "🔵", color: "bg-cyan-500" },
+          { key: "Postój",      val: bd.idle,      icon: "⏸️", color: "bg-yellow-500" },
+        ].sort((a,b) => b.val - a.val);
+
+        // Find biggest culprit
+        const biggest = costs[0];
+        const biggestPct = r.frachtEur > 0 ? (biggest.val / r.frachtEur * 100) : 0;
+
+        // Break-even analysis
+        const freightForZero  = Math.ceil(r.totalCost);
+        const freightFor15    = Math.ceil(r.totalCost / 0.85);
+        const freightDeltaZero = freightForZero - r.frachtEur;
+        const freightDelta15   = freightFor15 - r.frachtEur;
+
+        // Per-km comparison
+        const avgCostPerKm = 1.85; // rough fleet avg EUR/km (all costs)
+
+        // Diagnoza
+        const diagnoses: string[] = [];
+        if (r.frachtEur / r.distanceKm < 1.5)
+          diagnoses.push(`Niski fracht per km: ${(r.frachtEur/r.distanceKm).toFixed(2)} €/km — rynek zazwyczaj wymaga min. 1.50 €/km`);
+        if (bd.toll / r.frachtEur > 0.25)
+          diagnoses.push(`Myto stanowi ${(bd.toll/r.frachtEur*100).toFixed(0)}% frachtu — trasa przez drogi kraje (DE/AT/CH/FR)`);
+        if (bd.driver / r.frachtEur > 0.35)
+          diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — za mało km na tej trasie`);
+        if (r.distanceKm < 300)
+          diagnoses.push(`Krótka trasa (${Math.round(r.distanceKm)} km) — wysokie koszty stałe (leasing, ubezp.) na małej odległości`);
+        if (bd.leasing / r.frachtEur > 0.20)
+          diagnoses.push(`Leasing pochłania ${(bd.leasing/r.frachtEur*100).toFixed(0)}% frachtu — pojazd za drogi do tej trasy`);
+        if (diagnoses.length === 0)
+          diagnoses.push(`Łączne koszty (${Math.round(r.totalCost)} €) przekraczają fracht (${Math.round(r.frachtEur)} €) o ${Math.abs(Math.round(r.marginEur))} €`);
+
+        return (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={e => e.target === e.currentTarget && setAnalysisRoute(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className={`px-6 py-4 rounded-t-2xl ${r.marginPct < 0 ? "bg-red-600" : "bg-amber-500"} text-white`}>
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold">Analiza trasy — {r.orderNr}</h2>
+                  <p className="text-sm opacity-90">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-3xl font-black">{fmtPct(r.marginPct)}</div>
+                  <div className="text-xs opacity-75">{Math.round(r.marginEur)} € marży</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {/* Diagnosis */}
+              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">🔍 Diagnoza przyczyny straty</p>
+                <ul className="space-y-1.5">
+                  {diagnoses.map((d,i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm text-red-800">
+                      <span className="text-red-500 mt-0.5">→</span>{d}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {/* Cost breakdown bars */}
+              <div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-3">Struktura kosztów vs fracht</p>
+                <div className="space-y-2">
+                  {/* Fracht bar */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs w-20 text-right text-slate-500">Fracht</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                      <div className="h-full bg-emerald-500 rounded-full" style={{width:"100%"}} />
+                    </div>
+                    <span className="text-xs w-20 font-bold text-emerald-700">{Math.round(r.frachtEur)} €</span>
+                    <span className="text-xs w-10 text-slate-400">100%</span>
+                  </div>
+                  {/* Cost bars */}
+                  {costs.filter(c => c.val > 0).map(c => {
+                    const pct = r.frachtEur > 0 ? Math.min((c.val/r.frachtEur)*100, 100) : 0;
+                    const isHigh = pct > 30;
+                    return (
+                      <div key={c.key} className="flex items-center gap-3">
+                        <span className="text-xs w-20 text-right text-slate-500">{c.icon} {c.key}</span>
+                        <div className="flex-1 bg-slate-100 rounded-full h-4 overflow-hidden">
+                          <div className={`h-full rounded-full ${isHigh ? "bg-red-500" : c.color} opacity-80`}
+                            style={{width:`${pct}%`}} />
+                        </div>
+                        <span className={`text-xs w-20 font-semibold ${isHigh?"text-red-600":"text-slate-700"}`}>
+                          {Math.round(c.val)} €
+                        </span>
+                        <span className={`text-xs w-10 ${isHigh?"text-red-600 font-bold":"text-slate-400"}`}>
+                          {pct.toFixed(0)}%
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {/* Total */}
+                  <div className="flex items-center gap-3 border-t pt-2">
+                    <span className="text-xs w-20 text-right font-bold text-slate-700">RAZEM</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                      <div className="h-full bg-red-600 rounded-full"
+                        style={{width:`${Math.min((r.totalCost/r.frachtEur)*100,150)}%`}} />
+                    </div>
+                    <span className="text-xs w-20 font-bold text-red-700">{Math.round(r.totalCost)} €</span>
+                    <span className="text-xs w-10 text-red-600 font-bold">
+                      {r.frachtEur>0?(r.totalCost/r.frachtEur*100).toFixed(0):0}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-km */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 rounded-xl p-3 text-center">
+                  <div className="text-xs text-slate-500 mb-1">Koszt HBM / km</div>
+                  <div className={`text-xl font-bold ${r.costPerKm > 1.7 ? "text-red-600" : "text-slate-800"}`}>
+                    {r.costPerKm.toFixed(2)} €/km
+                  </div>
+                  <div className="text-xs text-slate-400">śr. flota ~1.50–1.70 €/km</div>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3 text-center">
+                  <div className="text-xs text-slate-500 mb-1">Fracht / km</div>
+                  <div className={`text-xl font-bold ${r.revenuePerKm < 1.5 ? "text-red-600" : "text-emerald-600"}`}>
+                    {r.revenuePerKm.toFixed(2)} €/km
+                  </div>
+                  <div className="text-xs text-slate-400">min. rentowność ~1.80 €/km</div>
+                </div>
+              </div>
+
+              {/* Break-even */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3">📈 Co musi się zmienić?</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="text-center">
+                    <div className="text-lg font-black text-blue-800">{freightForZero.toLocaleString("pl-PL")} €</div>
+                    <div className="text-xs text-blue-600">fracht na próg 0%</div>
+                    <div className="text-xs text-slate-500 mt-0.5">+{freightDeltaZero.toLocaleString("pl-PL")} € do obecnego</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-black text-emerald-700">{freightFor15.toLocaleString("pl-PL")} €</div>
+                    <div className="text-xs text-emerald-600">fracht na marżę 15%</div>
+                    <div className="text-xs text-slate-500 mt-0.5">+{freightDelta15.toLocaleString("pl-PL")} € do obecnego</div>
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={() => setAnalysisRoute(null)}
+                className="w-full py-2.5 border border-slate-200 text-slate-600 text-sm rounded-xl hover:border-slate-400 transition-colors">
+                Zamknij
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }
