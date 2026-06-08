@@ -18,6 +18,7 @@ interface Vehicle {
   reg: string;
   brand: string | null;
   model: string | null;
+  vehicle_type: string | null;
   dispatcher_id: string | null;
   avg_fuel_l100: number | null;
   year_produced: number | null;
@@ -47,6 +48,8 @@ interface DispatcherKPI {
   id: string;
   name: string;
   vehicles: string[];
+  ciagniki: string[];
+  naczepy: string[];
   routes: number;
   frachtEur: number;
   costEur: number;
@@ -94,6 +97,10 @@ export default function DyspozytorzyPage() {
   const [weekLabel, setWeekLabel] = useState("");
   const [eurRate, setEurRate] = useState(4.27);
   const [fuelPrice, setFuelPrice] = useState(1.25);
+  // Filters
+  const [vehicleTypeFilter, setVehicleTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");
+  const [configTypeFilter, setConfigTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");
+  const [routeSearch, setRouteSearch] = useState("");
 
   // Config state
   const [newDispName, setNewDispName] = useState("");
@@ -115,7 +122,7 @@ export default function DyspozytorzyPage() {
     setLoading(true);
     const [{ data: disps }, { data: vehs }] = await Promise.all([
       supabase.from("dispatchers").select("*").eq("is_active", true).order("name"),
-      supabase.from("vehicles").select("reg,brand,model,dispatcher_id,avg_fuel_l100,year_produced,leasing_eur_mo,insurance_eur_mo,service_cost_km,avg_km_month").eq("is_active", true).order("reg"),
+      supabase.from("vehicles").select("reg,brand,model,vehicle_type,dispatcher_id,avg_fuel_l100,year_produced,leasing_eur_mo,insurance_eur_mo,service_cost_km,avg_km_month").eq("is_active", true).order("vehicle_type,reg"),
     ]);
     setDispatchers(disps ?? []);
     setVehicles(vehs ?? []);
@@ -225,15 +232,16 @@ export default function DyspozytorzyPage() {
       grouped[key].push(m);
     }
 
-    const kpis: DispatcherKPI[] = dispatchers.map(d => {
-      const routes = grouped[d.id] ?? [];
+    const buildKpi = (d: {id: string; name: string}, routes: RouteMetric[], vehs: Vehicle[]) => {
       const frachtEur = routes.reduce((s, r) => s + r.frachtEur, 0);
       const costEur   = routes.reduce((s, r) => s + r.totalCost, 0);
       const marginEur = frachtEur - costEur;
       const marginPct = frachtEur > 0 ? (marginEur / frachtEur) * 100 : 0;
-      const vehs = vehicles.filter(v => v.dispatcher_id === d.id).map(v => v.reg);
       return {
-        id: d.id, name: d.name, vehicles: vehs,
+        id: d.id, name: d.name,
+        vehicles: vehs.map(v => v.reg),
+        ciagniki: vehs.filter(v => v.vehicle_type === "ciągnik").map(v => v.reg),
+        naczepy:  vehs.filter(v => v.vehicle_type === "naczepa").map(v => v.reg),
         routes: routes.length, frachtEur, costEur, marginEur, marginPct,
         kmTotal: Math.round(routes.reduce((s, r) => s + r.distanceKm, 0)),
         losses:    routes.filter(r => r.marginPct < 0).length,
@@ -243,6 +251,11 @@ export default function DyspozytorzyPage() {
         avgMarginPct: routes.length > 0 ? routes.reduce((s,r) => s+r.marginPct,0)/routes.length : 0,
         routeList: routes,
       };
+    };
+
+    const kpis: DispatcherKPI[] = dispatchers.map(d => {
+      const vehs = vehicles.filter(v => v.dispatcher_id === d.id);
+      return buildKpi(d, grouped[d.id] ?? [], vehs);
     });
 
     // Add unassigned
@@ -251,7 +264,7 @@ export default function DyspozytorzyPage() {
       const fr = unassigned.reduce((s,r)=>s+r.frachtEur,0);
       const co = unassigned.reduce((s,r)=>s+r.totalCost,0);
       kpis.push({
-        id: UNASSIGNED, name: "⚠ Nieprzypisane", vehicles: [],
+        id: UNASSIGNED, name: "⚠ Nieprzypisane", vehicles: [], ciagniki: [], naczepy: [],
         routes: unassigned.length, frachtEur: fr, costEur: co,
         marginEur: fr-co, marginPct: fr > 0 ? (fr-co)/fr*100 : 0,
         kmTotal: Math.round(unassigned.reduce((s,r)=>s+r.distanceKm,0)),
@@ -280,10 +293,10 @@ export default function DyspozytorzyPage() {
       ["RAPORT TYGODNIOWY HBM AUDYT — Wyniki Dyspozytorów"],
       [`Tydzień: ${weekLabel}`, "", "", `Kurs EUR/PLN: ${eurRate}`, `Paliwo: ${fuelPrice} EUR/l`],
       [],
-      ["Dyspozytor", "Pojazdy", "Trasy", "Fracht EUR", "Koszty HBM EUR", "Marża EUR", "Marża %",
+      ["Dyspozytor", "Ciągniki", "Naczepy", "Trasy", "Fracht EUR", "Koszty HBM EUR", "Marża EUR", "Marża %",
        "Śr. marża %", "Km", "Straty", "Niska marża", "Rentowne"],
       ...kpiData.map(d => [
-        d.name, d.vehicles.length, d.routes,
+        d.name, d.ciagniki.length, d.naczepy.length, d.routes,
         Math.round(d.frachtEur), Math.round(d.costEur), Math.round(d.marginEur),
         +d.marginPct.toFixed(1), +d.avgMarginPct.toFixed(1), d.kmTotal,
         d.losses, d.lowMargin + d.breakeven, d.profitable,
@@ -387,13 +400,30 @@ export default function DyspozytorzyPage() {
       {/* ── Dashboard ── */}
       {activeTab === "dashboard" && (
         <div className="space-y-4">
+          {/* Vehicle type filter */}
+          {kpiData.length > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 font-medium uppercase tracking-wide">Filtruj trasy wg pojazdu:</span>
+              {(["all","ciągnik","naczepa"] as const).map(t => (
+                <button key={t} onClick={() => setVehicleTypeFilter(t)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                    vehicleTypeFilter === t
+                      ? t === "ciągnik" ? "bg-blue-600 text-white"
+                        : t === "naczepa" ? "bg-slate-600 text-white"
+                        : "bg-slate-800 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                  {t === "all" ? "🚛+🚌 Wszystkie" : t === "ciągnik" ? "🚛 Ciągniki" : "🚌 Naczepy"}
+                </button>
+              ))}
+            </div>
+          )}
           {kpiData.length === 0 ? (
             <div className="card py-16 text-center text-slate-400">
               <p className="text-lg mb-2">Brak danych</p>
               <p className="text-sm">Wczytaj plik TMS żeby zobaczyć wyniki dyspozytorów</p>
             </div>
           ) : (
-            <>
+<>
               {/* Fleet totals */}
               <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
                 {[
@@ -412,46 +442,73 @@ export default function DyspozytorzyPage() {
 
               {/* Per dispatcher cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {kpiData.filter(d=>d.id!=="__unassigned__").map(d => (
+                {kpiData.filter(d=>d.id!=="__unassigned__").map(d => {
+                  // Apply vehicle type filter to route list for this card
+                  const filteredRoutes = vehicleTypeFilter === "all" ? d.routeList
+                    : d.routeList.filter(r => {
+                        const vType = vehicles.find(v=>v.reg===r.vehicle)?.vehicle_type;
+                        return vehicleTypeFilter === "ciągnik" ? vType === "ciągnik" : vType === "naczepa";
+                      });
+                  const filtFracht = filteredRoutes.reduce((s,r)=>s+r.frachtEur,0);
+                  const filtCost   = filteredRoutes.reduce((s,r)=>s+r.totalCost,0);
+                  const filtMargin = filtFracht - filtCost;
+                  const filtMarginPct = filtFracht > 0 ? (filtMargin/filtFracht)*100 : 0;
+                  return (
                   <div key={d.id}
                     onClick={()=>setSelectedDispatcher(selectedDispatcher===d.id?null:d.id)}
-                    className={`card cursor-pointer transition-all ${selectedDispatcher===d.id?"ring-2 ring-blue-500 shadow-md":""} ${d.losses>0?"border-l-4 border-red-400":d.avgMarginPct>=15?"border-l-4 border-emerald-400":"border-l-4 border-amber-400"}`}>
+                    className={`card cursor-pointer transition-all ${selectedDispatcher===d.id?"ring-2 ring-blue-500 shadow-md":""} ${filteredRoutes.some(r=>r.marginPct<0)?"border-l-4 border-red-400":filtMarginPct>=15?"border-l-4 border-emerald-400":"border-l-4 border-amber-400"}`}>
                     <div className="flex items-start justify-between">
                       <div>
                         <h3 className="font-bold text-slate-800">{d.name}</h3>
-                        <p className="text-xs text-slate-400 mt-0.5">{d.vehicles.length} pojazdów · {d.routes} tras · {d.kmTotal.toLocaleString("pl-PL")} km</p>
+                        {/* CIĄ / NAC badges */}
+                        <div className="flex gap-1 mt-1 flex-wrap">
+                          {d.ciagniki.length > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${vehicleTypeFilter==="ciągnik"?"bg-blue-600 text-white":"bg-blue-100 text-blue-700"}`}>
+                              🚛 {d.ciagniki.length} CIĄ
+                            </span>
+                          )}
+                          {d.naczepy.length > 0 && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${vehicleTypeFilter==="naczepa"?"bg-slate-600 text-white":"bg-slate-100 text-slate-600"}`}>
+                              🚌 {d.naczepy.length} NAC
+                            </span>
+                          )}
+                          <span className="text-[10px] text-slate-400">{filteredRoutes.length} tras · {Math.round(filteredRoutes.reduce((s,r)=>s+r.distanceKm,0)).toLocaleString("pl-PL")} km</span>
+                        </div>
                       </div>
                       <div className="text-right">
-                        <div className={`text-2xl font-black ${marginColor(d.marginPct)}`}>{fmtPct(d.marginPct)}</div>
+                        <div className={`text-2xl font-black ${marginColor(filtMarginPct)}`}>{fmtPct(filtMarginPct)}</div>
                         <div className="text-xs text-slate-400">marża</div>
                       </div>
                     </div>
 
                     <div className="mt-3 grid grid-cols-3 gap-2 text-center">
                       <div className="bg-slate-50 rounded-lg py-2">
-                        <div className="text-sm font-bold text-slate-800">{fmtEur(d.frachtEur)}</div>
+                        <div className="text-sm font-bold text-slate-800">{fmtEur(filtFracht)}</div>
                         <div className="text-xs text-slate-400">fracht</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg py-2">
-                        <div className={`text-sm font-bold ${marginColor(d.marginPct)}`}>{fmtEur(d.marginEur)}</div>
+                        <div className={`text-sm font-bold ${marginColor(filtMarginPct)}`}>{fmtEur(filtMargin)}</div>
                         <div className="text-xs text-slate-400">marża EUR</div>
                       </div>
                       <div className="bg-slate-50 rounded-lg py-2">
-                        <div className="text-sm font-bold text-slate-800">{fmtPct(d.avgMarginPct)}</div>
+                        <div className="text-sm font-bold text-slate-800">
+                          {filteredRoutes.length>0 ? fmtPct(filteredRoutes.reduce((s,r)=>s+r.marginPct,0)/filteredRoutes.length) : "—"}
+                        </div>
                         <div className="text-xs text-slate-400">śr./trasę</div>
                       </div>
                     </div>
 
                     {/* Mini bar */}
-                    <div className="mt-3 flex gap-1 text-xs">
-                      {d.profitable>0 && <div className="bg-emerald-500 text-white rounded px-1.5 py-0.5">✓ {d.profitable}</div>}
-                      {d.breakeven>0  && <div className="bg-amber-400 text-white rounded px-1.5 py-0.5">~ {d.breakeven}</div>}
-                      {d.lowMargin>0  && <div className="bg-orange-400 text-white rounded px-1.5 py-0.5">↓ {d.lowMargin}</div>}
-                      {d.losses>0     && <div className="bg-red-600 text-white rounded px-1.5 py-0.5 font-bold">✗ {d.losses} STRAT</div>}
-                      {d.routes===0   && <div className="text-slate-400 italic">brak tras w tym tygodniu</div>}
+                    <div className="mt-3 flex gap-1 text-xs flex-wrap">
+                      {filteredRoutes.filter(r=>r.marginPct>=15).length>0 && <div className="bg-emerald-500 text-white rounded px-1.5 py-0.5">✓ {filteredRoutes.filter(r=>r.marginPct>=15).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15).length>0 && <div className="bg-amber-400 text-white rounded px-1.5 py-0.5">~ {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5).length>0 && <div className="bg-orange-400 text-white rounded px-1.5 py-0.5">↓ {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct<0).length>0 && <div className="bg-red-600 text-white rounded px-1.5 py-0.5 font-bold">✗ {filteredRoutes.filter(r=>r.marginPct<0).length} STRAT</div>}
+                      {filteredRoutes.length===0 && <div className="text-slate-400 italic">brak tras w tym tygodniu</div>}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
 
               {/* Unassigned warning */}
@@ -521,6 +578,20 @@ export default function DyspozytorzyPage() {
 
       {/* ── All Routes ── */}
       {activeTab === "routes" && (
+        <div className="space-y-3">
+          {/* Route filters */}
+          <div className="flex gap-2 flex-wrap items-center">
+            <input value={routeSearch} onChange={e=>setRouteSearch(e.target.value)}
+              placeholder="Szukaj zlecenia, pojazdu, trasy…"
+              className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none w-64" />
+            {(["all","ciągnik","naczepa"] as const).map(t => (
+              <button key={t} onClick={() => setVehicleTypeFilter(t)}
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                  vehicleTypeFilter === t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                {t === "all" ? "Wszystkie" : t === "ciągnik" ? "🚛 Ciągniki" : "🚌 Naczepy"}
+              </button>
+            ))}
+          </div>
         <div className="card overflow-x-auto p-0">
           {allRoutes.length === 0 ? (
             <div className="py-16 text-center text-slate-400 text-sm">Wczytaj plik TMS</div>
@@ -538,26 +609,45 @@ export default function DyspozytorzyPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {allRoutes.sort((a,b)=>a.marginPct-b.marginPct).map(r => (
-                  <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.marginPct<0?"bg-red-50/40":""}`}>
-                    <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
-                    <td className="px-4 py-2 text-xs font-medium text-slate-700">{r.dispatcherName}</td>
-                    <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
-                    <td className="px-4 py-2 text-xs">{r.originCountry}→{r.destCountry}</td>
-                    <td className="px-4 py-2 text-right text-xs">{Math.round(r.frachtEur).toLocaleString("pl-PL")} €</td>
-                    <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>{fmtPct(r.marginPct)}</td>
-                    <td className="px-4 py-2 text-center">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${
-                        r.marginPct>=15?"bg-emerald-100 text-emerald-700":r.marginPct>=5?"bg-amber-100 text-amber-700":
-                        r.marginPct>=0?"bg-orange-100 text-orange-700":"bg-red-100 text-red-700 font-bold"}`}>
-                        {r.label}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {allRoutes
+                  .filter(r => {
+                    const vType = vehicles.find(v=>v.reg===r.vehicle)?.vehicle_type;
+                    const typeOk = vehicleTypeFilter === "all" || vType === vehicleTypeFilter;
+                    const q = routeSearch.toLowerCase();
+                    const searchOk = !q || r.orderNr.toLowerCase().includes(q) ||
+                      r.vehicle.toLowerCase().includes(q) || r.dispatcherName.toLowerCase().includes(q) ||
+                      r.originCountry.toLowerCase().includes(q) || r.destCountry.toLowerCase().includes(q);
+                    return typeOk && searchOk;
+                  })
+                  .sort((a,b)=>a.marginPct-b.marginPct)
+                  .map(r => {
+                    const vType = vehicles.find(v=>v.reg===r.vehicle)?.vehicle_type;
+                    return (
+                    <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.marginPct<0?"bg-red-50/40":""}`}>
+                      <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
+                      <td className="px-4 py-2 text-xs font-medium text-slate-700">{r.dispatcherName}</td>
+                      <td className="px-4 py-2">
+                        <span className="font-mono text-xs font-semibold">{r.vehicle}</span>
+                        <span className={`ml-1.5 text-[10px] px-1 py-0 rounded font-bold ${vType==="ciągnik"?"bg-blue-100 text-blue-700":"bg-slate-100 text-slate-600"}`}>
+                          {vType==="ciągnik"?"CIĄ":"NAC"}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-xs">{r.originCountry}→{r.destCountry}</td>
+                      <td className="px-4 py-2 text-right text-xs">{Math.round(r.frachtEur).toLocaleString("pl-PL")} €</td>
+                      <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>{fmtPct(r.marginPct)}</td>
+                      <td className="px-4 py-2 text-center">
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          r.marginPct>=15?"bg-emerald-100 text-emerald-700":r.marginPct>=5?"bg-amber-100 text-amber-700":
+                          r.marginPct>=0?"bg-orange-100 text-orange-700":"bg-red-100 text-red-700 font-bold"}`}>
+                          {r.label}
+                        </span>
+                      </td>
+                    </tr>
+                  );})}
               </tbody>
             </table>
           )}
+        </div>
         </div>
       )}
 
@@ -581,23 +671,40 @@ export default function DyspozytorzyPage() {
 
           {/* Vehicle assignment */}
           <div className="card p-0 overflow-hidden">
-            <div className="px-4 py-3 bg-slate-50 border-b">
-              <h3 className="font-bold text-slate-800">Przypisanie pojazdów do dyspozytorów</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Kliknij wiersz aby zmienić przypisanie</p>
+            <div className="px-4 py-3 bg-slate-50 border-b flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="font-bold text-slate-800">Przypisanie pojazdów do dyspozytorów</h3>
+                <p className="text-xs text-slate-500 mt-0.5">{vehicles.filter(v=>configTypeFilter==="all"||v.vehicle_type===configTypeFilter).length} pojazdów</p>
+              </div>
+              <div className="flex gap-1">
+                {(["all","ciągnik","naczepa"] as const).map(t => (
+                  <button key={t} onClick={()=>setConfigTypeFilter(t)}
+                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
+                      configTypeFilter===t ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200"}`}>
+                    {t==="all"?"Wszystkie":t==="ciągnik"?"🚛 Ciągniki":"🚌 Naczepy"}
+                  </button>
+                ))}
+              </div>
             </div>
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200">
                 <tr>
                   <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Rejestracja</th>
+                  <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Typ</th>
                   <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Marka</th>
                   <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Dyspozytor</th>
                   <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Zmień</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
-                {vehicles.map(v => (
+                {vehicles.filter(v => configTypeFilter==="all" || v.vehicle_type===configTypeFilter).map(v => (
                   <tr key={v.reg} className="hover:bg-slate-50">
                     <td className="px-4 py-2 font-mono font-semibold text-slate-800">{v.reg}</td>
+                    <td className="px-4 py-2">
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${v.vehicle_type==="ciągnik"?"bg-blue-100 text-blue-700":"bg-slate-100 text-slate-600"}`}>
+                        {v.vehicle_type==="ciągnik"?"CIĄ":"NAC"}
+                      </span>
+                    </td>
                     <td className="px-4 py-2 text-slate-600 text-xs">{v.brand ?? "—"}</td>
                     <td className="px-4 py-2">
                       {v.dispatcher_id && dispById[v.dispatcher_id]
