@@ -216,7 +216,7 @@ export default function AnalizaPage() {
               fuelPriceEurL: fuelPrice, freightEur: 1,
               transitCountries: [originCountry, destCountry],
               avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
-              insuranceEurMo, serviceCostKmOverride, avgKmPerMonthActual,
+              insuranceEurMo, serviceCostKmOverride, routeDays,
               overrideTollEur: tmsTollEur || undefined,
             });
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
