@@ -20,7 +20,7 @@ export interface RouteInput {
   insuranceEurMo?: number;         // OC+AC EUR/mo per vehicle (from Supabase)
   serviceCostKmOverride?: number;  // EUR/km override per vehicle (from Supabase)
   avgKmPerMonthActual?: number;    // DEPRECATED — kept for backward compat, ignored if routeDays provided
-  routeDays?: number;              // actual route duration in days (from TMS dates or ceil(km/450))
+  routeDays?: number;              // actual route duration in days (from TMS dates or ceil(km/570))
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
 }
@@ -61,10 +61,10 @@ export const FLEET = {
   driverCostPerKmFlat:   0.39,    // EUR/km — flat rate fallback only
   // ── Model dobowy (rekomendowany) ─────────────────────────────
   // 3821 EUR netto / 21 dni roboczych = 181.95 EUR/dobę
-  // Doby trasy = z dat TMS lub ceil(km/450 km/dobę limit UE)
+  // Doby trasy = z dat TMS lub ceil(km/570 km/dobę — dane rzeczywiste floty HBM)
   driverWorkDaysPerMonth: 21,     // dni robocze TIR/mies. (po odpoczynkach tygodniowych)
   driverDailyCostNet:     181.95, // 3821 / 21 = 181.95 EUR/dobę
-  driverKmPerDay:         450,    // max km/dobę HGV EU (9h × 50 km/h avg)
+  driverKmPerDay:         570,    // śr. km/dobę flota HBM (9h × ~63 km/h śr.) — dane rzeczywiste
   serviceCostNewKm:          0.009,    // MAN TGX 2023-2024
   serviceCostOldKm:          0.020,    // MAN TGX 2018-2019, DAF XF 2019
   leasingNewEurMo:           733.33,   // ciągnik ≥2022 ~8 800 EUR/yr
