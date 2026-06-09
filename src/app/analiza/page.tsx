@@ -155,6 +155,10 @@ export default function AnalizaPage() {
           const distanceKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
           if (distanceKm < 10) return null;
 
+          // Empty/deadhead km — added to cost base (fuel + service) but not revenue
+          const emptyKmRaw = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
+          const emptyKm = emptyKmRaw > 0 ? emptyKmRaw : undefined;
+
           const frachtRaw = get(row, "fracht z wal", "fracht");
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
           let frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
@@ -212,7 +216,7 @@ export default function AnalizaPage() {
           let frachtEstimated = false;
           if (frachtEur === 0 && tmsMarzaPerKm > 0) {
             const breakdown0 = calculateRoute({
-              originCountry, destCountry, distanceKm,
+              originCountry, destCountry, distanceKm, emptyKm,
               fuelPriceEurL: fuelPrice, freightEur: 1,
               transitCountries: [originCountry, destCountry],
               avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
@@ -224,7 +228,7 @@ export default function AnalizaPage() {
           }
 
           const breakdown = calculateRoute({
-            originCountry, destCountry, distanceKm,
+            originCountry, destCountry, distanceKm, emptyKm,
             fuelPriceEurL: fuelPrice,
             freightEur: frachtEur,
             transitCountries: [originCountry, destCountry],

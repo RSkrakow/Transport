@@ -43,7 +43,9 @@ interface RouteMetric {
   originCountry: string;
   destCountry: string;
   distanceKm: number;
+  emptyKm?: number;
   frachtEur: number;
+  frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from margin/km
   totalCost: number;
   marginEur: number;
   marginPct: number;
@@ -197,12 +199,18 @@ export default function DyspozytorzyPage() {
     for (const row of all.slice(hIdx + 1)) {
       const orderNr = get(row, "Nr pełny", "Nr pe");
       if (!orderNr) continue;
-      const distanceKm = parseFloat(get(row, "km ład", "Km") || "0");
+
+      // km ładowne — fallback "km wg" (kolumna wg mapy), unified with analiza
+      const distanceKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
       if (distanceKm < 10) continue;
 
+      // Empty/deadhead km — increases fuel/service costs but not revenue
+      const emptyKmRaw = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
+      const emptyKm = emptyKmRaw > 0 ? emptyKmRaw : undefined;
+
       const frachtRaw = get(row, "fracht z wal", "fracht");
-      const frachtEur = parseFracht(frachtRaw, eurRate);
-      if (frachtEur === 0) continue;
+      let frachtEur = parseFracht(frachtRaw, eurRate);
+      // NOTE: do NOT skip fracht=0 routes — estimate them like analiza does (see below)
 
       const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
       const client  = get(row, "zleceniodawca", "klient", "nadawca") || "—";
@@ -210,8 +218,17 @@ export default function DyspozytorzyPage() {
       const destCountry   = get(row, "roz. kraj", "kraj ro").toUpperCase() || "PL";
 
       const vData = vehMap[vehicle];
-      const tmsTollPln = parseFloat(get(row, "myto na trasie pln") || "0");
-      const tmsTollEur = tmsTollPln > 0 ? Math.round((tmsTollPln / eurRate) * 100) / 100 : 0;
+
+      // Real toll: prefer EUR column, fallback to PLN→EUR (unified with analiza)
+      const tmsTollEurRaw = parseFloat(get(row, "myto na trasie eur") || "0");
+      const tmsTollPlnRaw = parseFloat(get(row, "myto na trasie pln") || "0");
+      const tmsTollEur = tmsTollEurRaw > 0
+        ? tmsTollEurRaw
+        : tmsTollPlnRaw > 0 ? Math.round((tmsTollPlnRaw / eurRate) * 100) / 100 : 0;
+
+      // TMS own margin/km — used to estimate fracht when invoice missing
+      const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
+      const tmsMarzaPerKm = isNaN(tmsMarzaPerKmRaw) ? 0 : tmsMarzaPerKmRaw;
 
       // Route days from TMS dates
       const parseExcelDate = (s: string) => {
@@ -229,9 +246,9 @@ export default function DyspozytorzyPage() {
         }
       }
 
-      const bd = calculateRoute({
-        originCountry, destCountry, distanceKm,
-        fuelPriceEurL: fuelPrice, freightEur: frachtEur,
+      const calcBase = {
+        originCountry, destCountry, distanceKm, emptyKm,
+        fuelPriceEurL: fuelPrice,
         transitCountries: [originCountry, destCountry],
         avgFuelL100: vData?.avg_fuel_l100 ?? FLEET.avgFuelL100,
         vehicleYearProduced: vData?.year_produced ?? undefined,
@@ -240,15 +257,29 @@ export default function DyspozytorzyPage() {
         serviceCostKmOverride: vData?.service_cost_km ?? undefined,
         routeDays,
         overrideTollEur: tmsTollEur || undefined,
-      });
+      };
+
+      // Estimate fracht when TMS has no invoice yet (fracht=0), using TMS margin/km
+      // Unified with analiza/page.tsx logic
+      let frachtEstimated = false;
+      if (frachtEur === 0 && tmsMarzaPerKm > 0) {
+        const bd0 = calculateRoute({ ...calcBase, freightEur: 1 });
+        frachtEur = Math.round((bd0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
+        frachtEstimated = true;
+      }
+      // Skip routes with truly no data (no invoice AND no TMS margin hint)
+      if (frachtEur === 0) continue;
+
+      const bd = calculateRoute({ ...calcBase, freightEur: frachtEur });
 
       const disp_id = dispMap[vehicle] ?? null;
       metrics.push({
         orderNr, client, vehicle,
         dispatcher_id: disp_id,
         dispatcherName: disp_id ? (dispNameMap[disp_id] ?? "—") : "Nieprzypisany",
-        originCountry, destCountry, distanceKm,
-        frachtEur, totalCost: bd.total, marginEur: bd.marginEur,
+        originCountry, destCountry, distanceKm, emptyKm,
+        frachtEur, frachtEstimated,
+        totalCost: bd.total, marginEur: bd.marginEur,
         marginPct: bd.marginPct, tollEur: bd.toll,
         label: bd.marginPct >= 15 ? "Rentowna" : bd.marginPct >= 5 ? "Niska marża" : bd.marginPct >= 0 ? "Próg" : "STRATA",
         routeDays: bd.routeDays,
@@ -673,7 +704,10 @@ export default function DyspozytorzyPage() {
                           <td className="px-4 py-2 text-right text-xs text-slate-500">
                             {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays}d</span>
                           </td>
-                          <td className="px-4 py-2 text-right text-xs font-medium">{Math.round(r.frachtEur).toLocaleString("pl-PL")}</td>
+                          <td className="px-4 py-2 text-right text-xs font-medium">
+                            {Math.round(r.frachtEur).toLocaleString("pl-PL")}
+                            {r.frachtEstimated && <div className="text-amber-500 text-[10px] font-normal">~szacowany</div>}
+                          </td>
                           <td className="px-4 py-2 text-right text-xs">{Math.round(r.totalCost).toLocaleString("pl-PL")}</td>
                           <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>
                             {fmtPct(r.marginPct)}

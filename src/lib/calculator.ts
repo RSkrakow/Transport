@@ -7,7 +7,8 @@
 export interface RouteInput {
   originCountry: string;           // ISO-2
   destCountry: string;             // ISO-2
-  distanceKm: number;
+  distanceKm: number;              // km ładowne (loaded km) — for revenue/km display
+  emptyKm?: number;                // km puste (deadhead/empty run) — added to cost base
   fuelPriceEurL: number;           // default 1.25
   vehicleReg?: string;
   avgFuelL100?: number;            // override; default fleet avg 29.62
@@ -138,8 +139,12 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
 
   const fuelL100 = input.avgFuelL100 ?? FLEET.avgFuelL100;
 
-  // 1. FUEL — l/100km × distance
-  const fuelLiters = (fuelL100 / 100) * distanceKm;
+  // Total km driven = loaded km + empty km (deadhead)
+  // Empty km increases fuel/service costs but generates no revenue
+  const totalKm = distanceKm + (input.emptyKm ?? 0);
+
+  // 1. FUEL — l/100km × TOTAL km (loaded + empty)
+  const fuelLiters = (fuelL100 / 100) * totalKm;
   const fuelCost   = fuelLiters * fuelPriceEurL;
 
   // 2. ADBLUE — 3.5% of diesel volume × ~0.35 EUR/l (avg market)
@@ -182,10 +187,11 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   const driverCost = routeDays * FLEET.driverDailyCostNet;
 
   // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
+  // Uses totalKm (loaded + empty) — service/wear applies to all km driven
   const isNewVehicle = vehicleYearProduced ? vehicleYearProduced >= 2022 : false;
   const serviceCostKm = input.serviceCostKmOverride
     ?? (isNewVehicle ? FLEET.serviceCostNewKm : FLEET.serviceCostOldKm);
-  const serviceCost = serviceCostKm * distanceKm;
+  const serviceCost = serviceCostKm * totalKm;
 
   // 7. LEASING — pro-rata per km
   const leasingMo = leasingEurMo
