@@ -175,12 +175,16 @@ export function calculateRoute(input: RouteInput, settings?: CalcSettings): Cost
   const fuelLiters = (fuelL100 / 100) * totalKm;
   const fuelCost   = fuelLiters * fuelPriceEurL;
 
-  // 2. ADBLUE
-  const adblueRate = (s.adblueRatePct ?? FLEET.adblueRatePct) / 100;
+  // 2. ADBLUE — FLEET.adblueRatePct is decimal (0.035), settings stores percent (3.5)
+  const adblueRate = s.adblueRatePct != null
+    ? s.adblueRatePct / 100
+    : FLEET.adblueRatePct;
   const adblue = fuelLiters * adblueRate * 0.35;
 
-  // 3. IDLE FUEL LOSSES
-  const idlePct = s.idleFuelPct ?? FLEET.idleFuelPct;
+  // 3. IDLE FUEL LOSSES — FLEET.idleFuelPct is decimal (0.021), settings stores percent (2.1)
+  const idlePct = s.idleFuelPct != null
+    ? s.idleFuelPct / 100
+    : FLEET.idleFuelPct;
   const idle = fuelCost * idlePct;
 
   // 4. TOLLS — use ORS real-route value if available, else matrix with EURO class adjustment
