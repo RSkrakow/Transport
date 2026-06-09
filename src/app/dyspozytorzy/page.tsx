@@ -1048,4 +1048,62 @@ export default function DyspozytorzyPage() {
                   {/* Total */}
                   <div className="flex items-center gap-3 border-t pt-2">
                     <span className="text-xs w-20 text-right font-bold text-slate-700">RAZEM</span>
-                    <div className="flex-1 bg-slate-100 rounded-full
+                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                      <div className="h-full bg-red-600 rounded-full"
+                        style={{width:`${Math.min((r.totalCost/r.frachtEur)*100,150)}%`}} />
+                    </div>
+                    <span className="text-xs w-20 font-bold text-red-700">{Math.round(r.totalCost)} €</span>
+                    <span className="text-xs w-10 text-red-600 font-bold">
+                      {r.frachtEur>0?(r.totalCost/r.frachtEur*100).toFixed(0):0}%
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Per-km */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-slate-50 rounded-xl p-3 text-center">
+                  <div className="text-xs text-slate-500 mb-1">Koszt HBM / km</div>
+                  <div className={`text-xl font-bold ${r.costPerKm > 1.7 ? "text-red-600" : "text-slate-800"}`}>
+                    {r.costPerKm.toFixed(2)} €/km
+                  </div>
+                  <div className="text-xs text-slate-400">śr. flota ~1.50–1.70 €/km</div>
+                </div>
+                <div className="bg-slate-50 rounded-xl p-3 text-center">
+                  <div className="text-xs text-slate-500 mb-1">Fracht / km</div>
+                  <div className={`text-xl font-bold ${r.revenuePerKm < 1.5 ? "text-red-600" : "text-emerald-600"}`}>
+                    {r.revenuePerKm.toFixed(2)} €/km
+                  </div>
+                  <div className="text-xs text-slate-400">min. rentowność ~1.80 €/km</div>
+                </div>
+              </div>
+
+              {/* Break-even */}
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3">📈 Co musi się zmienić?</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="text-center">
+                    <div className="text-lg font-black text-blue-800">{freightForZero.toLocaleString("pl-PL")} €</div>
+                    <div className="text-xs text-blue-600">fracht na próg 0%</div>
+                    <div className="text-xs text-slate-500 mt-0.5">+{freightDeltaZero.toLocaleString("pl-PL")} € do obecnego</div>
+                  </div>
+                  <div className="text-center">
+                    <div className="text-lg font-black text-emerald-700">{freightFor15.toLocaleString("pl-PL")} €</div>
+                    <div className="text-xs text-emerald-600">fracht na marżę 15%</div>
+                    <div className="text-xs text-slate-500 mt-0.5">+{freightDelta15.toLocaleString("pl-PL")} € do obecnego</div>
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={() => setAnalysisRoute(null)}
+                className="w-full py-2.5 border border-slate-200 text-slate-600 text-sm rounded-xl hover:border-slate-400 transition-colors">
+                Zamknij
+              </button>
+            </div>
+          </div>
+        </div>
+        );
+      })()}
+    </div>
+  );
+}

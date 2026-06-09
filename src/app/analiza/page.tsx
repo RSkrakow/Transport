@@ -714,4 +714,50 @@ export default function AnalizaPage() {
                       title={r.tollFromTms
                         ? `Myto z TMS (DKV/viaTOLL): ${r.tollCost.toFixed(2)} EUR`
                         : `Myto z macierzy HBM · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
-                      {r.tollCost.t
+                      {r.tollCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      <div className={`text-xs font-medium ${r.tollFromTms ? "text-emerald-600" : "text-slate-400"}`}>
+                        {r.tollFromTms ? "✓ TMS" : `≈ macierz`}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-slate-600">
+                      {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                    </td>
+                    <td className={`px-3 py-2.5 text-right font-bold text-lg ${
+                      r.noFreightData ? "text-slate-400" :
+                      r.marginPct >= 15 ? "text-emerald-600" :
+                      r.marginPct >= 5  ? "text-amber-600"   :
+                      r.marginPct >= 0  ? "text-orange-600"  : "text-red-600"}`}>
+                      {r.noFreightData ? "—" : `${r.marginPct}%`}
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[r.labelColor] ?? ""}`}>
+                        {r.label}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="text-xs text-slate-400 text-center">
+            Spalanie z Trimble per pojazd · Kurs PLN/EUR: {eurRate} · Paliwo: {fuelPrice} EUR/l
+            {verified.length > 0 && ` · ORS: ${verified.length} tras zweryfikowanych`}
+          </p>
+        </>
+      )}
+
+      {!loading && rows.length === 0 && !error && (
+        <div className="card text-center py-16">
+          <p className="text-4xl mb-3">📋</p>
+          <p className="text-slate-600 font-medium">Wgraj plik z trasami aby zobaczyć analizę</p>
+          <p className="text-sm text-slate-400 mt-1">
+            Format: eksport TMS — kolumny Nr pełny, Km ład. wg. mapy, Fracht z walutą, Ciągnik, Kraj/Miasto zał./roz.
+          </p>
+          <p className="text-xs text-slate-400 mt-2">
+            Po załadowaniu możesz uruchomić <strong>weryfikację ORS HGV</strong> — porówna km z TMS z rzeczywistą trasą ciężarówki
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}

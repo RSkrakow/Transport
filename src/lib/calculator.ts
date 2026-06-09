@@ -261,4 +261,25 @@ export function profitabilityLabel(marginPct: number): {
   if (marginPct >= 15) return { label: "Rentowna", color: "emerald" };
   if (marginPct >= 5)  return { label: "Niska marża", color: "amber" };
   if (marginPct >= 0)  return { label: "Próg rentowności", color: "orange" };
-  return { label:
+  return { label: "STRATA", color: "red" };
+}
+
+export function countryName(iso: string): string {
+  const map: Record<string, string> = {
+    PL: "Polska", DE: "Niemcy", FR: "Francja", IT: "Włochy",
+    ES: "Hiszpania", AT: "Austria", CZ: "Czechy", HU: "Węgry",
+    NL: "Holandia", BE: "Belgia", LU: "Luksemburg", CH: "Szwajcaria",
+    SI: "Słowenia", HR: "Chorwacja", SK: "Słowacja", RO: "Rumunia",
+    BG: "Bułgaria", PT: "Portugalia", SE: "Szwecja", DK: "Dania",
+    GB: "Wielka Brytania",
+  };
+  return map[iso] ?? iso;
+}
+
+export const COUNTRY_OPTIONS = Object.entries({
+  PL: "Polska", DE: "Niemcy", FR: "Francja", IT: "Włochy",
+  ES: "Hiszpania", AT: "Austria", CZ: "Czechy", HU: "Węgry",
+  NL: "Holandia", BE: "Belgia", LU: "Luksemburg", CH: "Szwajcaria",
+  SI: "Słowenia", HR: "Chorwacja", SK: "Słowacja", RO: "Rumunia",
+  BG: "Bułgaria", PT: "Portugalia", SE: "Szwecja", DK: "Dania",
+}).map(([iso, name]) => ({ iso, name }));
