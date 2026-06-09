@@ -15,7 +15,8 @@ export interface RouteInput {
   freightEur: number;
   transitCountries?: string[];     // incl. origin & dest for toll calc
   overrideTollEur?: number;        // from ORS real-route calculation (replaces matrix)
-  leasingEurMo?: number;           // vehicle-specific netto EUR/mo
+  leasingEurMo?: number;           // vehicle-specific netto EUR/mo (tractor)
+  trailerLeasingEurMo?: number;    // naczepa leasing EUR/mo (from fleet pairing or avg)
   insuranceEurMo?: number;         // OC+AC EUR/mo per vehicle (from Supabase)
   serviceCostKmOverride?: number;  // EUR/km override per vehicle (from Supabase)
   avgKmPerMonthActual?: number;    // DEPRECATED — kept for backward compat, ignored if routeDays provided
@@ -30,7 +31,8 @@ export interface CostBreakdown {
   toll: number;
   insurance: number;
   driver: number;
-  leasing: number;
+  leasing: number;        // tractor leasing
+  trailerLeasing: number; // naczepa leasing
   service: number;
   idle: number;
   total: number;
@@ -63,10 +65,13 @@ export const FLEET = {
   driverWorkDaysPerMonth: 21,     // dni robocze TIR/mies. (po odpoczynkach tygodniowych)
   driverDailyCostNet:     181.95, // 3821 / 21 = 181.95 EUR/dobę
   driverKmPerDay:         450,    // max km/dobę HGV EU (9h × 50 km/h avg)
-  serviceCostNewKm:     0.009,    // MAN TGX 2023-2024
-  serviceCostOldKm:     0.020,    // MAN TGX 2018-2019, DAF XF 2019
-  leasingNewEurMo:      733.33,   // ~8,800 EUR/yr
-  leasingOldEurMo:      520.83,   // ~6,250 EUR/yr
+  serviceCostNewKm:          0.009,    // MAN TGX 2023-2024
+  serviceCostOldKm:          0.020,    // MAN TGX 2018-2019, DAF XF 2019
+  leasingNewEurMo:           733.33,   // ciągnik ≥2022 ~8 800 EUR/yr
+  leasingOldEurMo:           520.83,   // ciągnik <2022  ~6 250 EUR/yr
+  // Naczepa leasing fallback (used when no fleet naczepa data available)
+  trailerLeasingNewEurMo:    458.33,   // naczepa ≥2020 ~5 500 EUR/yr
+  trailerLeasingOldEurMo:    333.33,   // naczepa <2020  ~4 000 EUR/yr
   avgKmPerMonth:        11_667,   // 140k km/yr fleet default (used if vehicle-specific unknown)
   idleFuelPct:          0.021,    // 2.1% idle losses (Trimble FMS Jan-May 2026)
   adblueRatePct:        0.035,    // AdBlue = 3.5% of diesel volume
@@ -193,11 +198,18 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     ?? (isNewVehicle ? FLEET.serviceCostNewKm : FLEET.serviceCostOldKm);
   const serviceCost = serviceCostKm * totalKm;
 
-  // 7. LEASING — pro-rata per km
+  // 7a. LEASING CIĄGNIKA — pro-rata per km
   const leasingMo = leasingEurMo
     ?? (isNewVehicle ? FLEET.leasingNewEurMo : FLEET.leasingOldEurMo);
   const leasingPerKm = leasingMo / FLEET.avgKmPerMonth;
   const leasingCost  = leasingPerKm * distanceKm;
+
+  // 7b. LEASING NACZEPY — pro-rata per km
+  // Priority: (1) paired trailer from fleet, (2) fleet-avg naczep passed in,
+  //           (3) year-tier fallback constant
+  const trailerLeasingMo = input.trailerLeasingEurMo
+    ?? (isNewVehicle ? FLEET.trailerLeasingNewEurMo : FLEET.trailerLeasingOldEurMo);
+  const trailerLeasingCost = (trailerLeasingMo / FLEET.avgKmPerMonth) * distanceKm;
 
   // 8. INSURANCE (OC+AC) — pro-rata per km from Supabase per vehicle
   // Fleet default: avg 188 EUR/mies. (6 531 PLN OC + 3 053 PLN AC @ 4.25)
@@ -205,7 +217,7 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   const insuranceCost = (insuranceMo / FLEET.avgKmPerMonth) * distanceKm;
 
   // ─── Totals ───────────────────────────────────────────────
-  const total = fuelCost + adblue + idle + tollCost + driverCost + serviceCost + leasingCost + insuranceCost;
+  const total = fuelCost + adblue + idle + tollCost + driverCost + serviceCost + leasingCost + trailerLeasingCost + insuranceCost;
 
   const marginEur = freightEur - total;
   const marginPct = freightEur > 0 ? (marginEur / freightEur) * 100 : 0;
@@ -222,9 +234,10 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     idle:    round2(idle),
     toll:    round2(tollCost),
     driver:  round2(driverCost),
-    service:   round2(serviceCost),
-    leasing:   round2(leasingCost),
-    insurance: round2(insuranceCost),
+    service:        round2(serviceCost),
+    leasing:        round2(leasingCost),
+    trailerLeasing: round2(trailerLeasingCost),
+    insurance:      round2(insuranceCost),
     total:     round2(total),
     marginEur:             round2(marginEur),
     marginPct:             round2(marginPct),
@@ -248,25 +261,4 @@ export function profitabilityLabel(marginPct: number): {
   if (marginPct >= 15) return { label: "Rentowna", color: "emerald" };
   if (marginPct >= 5)  return { label: "Niska marża", color: "amber" };
   if (marginPct >= 0)  return { label: "Próg rentowności", color: "orange" };
-  return { label: "STRATA", color: "red" };
-}
-
-export function countryName(iso: string): string {
-  const map: Record<string, string> = {
-    PL: "Polska", DE: "Niemcy", FR: "Francja", IT: "Włochy",
-    ES: "Hiszpania", AT: "Austria", CZ: "Czechy", HU: "Węgry",
-    NL: "Holandia", BE: "Belgia", LU: "Luksemburg", CH: "Szwajcaria",
-    SI: "Słowenia", HR: "Chorwacja", SK: "Słowacja", RO: "Rumunia",
-    BG: "Bułgaria", PT: "Portugalia", SE: "Szwecja", DK: "Dania",
-    GB: "Wielka Brytania",
-  };
-  return map[iso] ?? iso;
-}
-
-export const COUNTRY_OPTIONS = Object.entries({
-  PL: "Polska", DE: "Niemcy", FR: "Francja", IT: "Włochy",
-  ES: "Hiszpania", AT: "Austria", CZ: "Czechy", HU: "Węgry",
-  NL: "Holandia", BE: "Belgia", LU: "Luksemburg", CH: "Szwajcaria",
-  SI: "Słowenia", HR: "Chorwacja", SK: "Słowacja", RO: "Rumunia",
-  BG: "Bułgaria", PT: "Portugalia", SE: "Szwecja", DK: "Dania",
-}).map(([iso, name]) => ({ iso, name }));
+  return { label:

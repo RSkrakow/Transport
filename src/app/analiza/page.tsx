@@ -104,24 +104,36 @@ export default function AnalizaPage() {
     try {
       const { data: vehicles, error: dbErr } = await supabase
         .from("vehicles")
-        .select("reg, avg_fuel_l100, year_produced, leasing_eur_mo, insurance_eur_mo, service_cost_km, avg_km_month");
+        .select("reg, vehicle_type, dispatcher_id, avg_fuel_l100, year_produced, leasing_eur_mo, insurance_eur_mo, service_cost_km, avg_km_month");
 
       if (dbErr) setDebug(`DB warning: ${dbErr.message}`);
 
-      const fuelMap:      Record<string, number> = {};
-      const yearMap:      Record<string, number> = {};
-      const leasingMap:   Record<string, number> = {};
-      const insuranceMap: Record<string, number> = {};
-      const serviceMap:   Record<string, number> = {};
-      const kmMonthMap:   Record<string, number> = {};
+      const fuelMap:          Record<string, number> = {};
+      const yearMap:          Record<string, number> = {};
+      const leasingMap:       Record<string, number> = {};
+      const insuranceMap:     Record<string, number> = {};
+      const serviceMap:       Record<string, number> = {};
+      const kmMonthMap:       Record<string, number> = {};
+      // naczepa_reg → leasing EUR/mo (direct lookup from TMS naczepa column)
+      const trailerLeasingMap: Record<string, number> = {};
+
       for (const v of vehicles ?? []) {
-        if (v.reg && v.avg_fuel_l100)    fuelMap[v.reg]      = Number(v.avg_fuel_l100);
-        if (v.reg && v.year_produced)    yearMap[v.reg]      = Number(v.year_produced);
-        if (v.reg && v.leasing_eur_mo)   leasingMap[v.reg]   = Number(v.leasing_eur_mo);
-        if (v.reg && v.insurance_eur_mo) insuranceMap[v.reg] = Number(v.insurance_eur_mo);
-        if (v.reg && v.service_cost_km)  serviceMap[v.reg]   = Number(v.service_cost_km);
-        if (v.reg && v.avg_km_month)     kmMonthMap[v.reg]   = Number(v.avg_km_month);
+        if (!v.reg) continue;
+        if (v.avg_fuel_l100)    fuelMap[v.reg]      = Number(v.avg_fuel_l100);
+        if (v.year_produced)    yearMap[v.reg]      = Number(v.year_produced);
+        if (v.leasing_eur_mo)   leasingMap[v.reg]   = Number(v.leasing_eur_mo);
+        if (v.insurance_eur_mo) insuranceMap[v.reg] = Number(v.insurance_eur_mo);
+        if (v.service_cost_km)  serviceMap[v.reg]   = Number(v.service_cost_km);
+        if (v.avg_km_month)     kmMonthMap[v.reg]   = Number(v.avg_km_month);
+        if (v.vehicle_type === "naczepa" && v.leasing_eur_mo)
+          trailerLeasingMap[v.reg] = Number(v.leasing_eur_mo);
       }
+
+      // Fleet average naczepa leasing — fallback when naczepa not found in vehicles table
+      const allTrailerLeasings = Object.values(trailerLeasingMap);
+      const fleetAvgTrailerLeasing = allTrailerLeasings.length
+        ? allTrailerLeasings.reduce((a, b) => a + b, 0) / allTrailerLeasings.length
+        : undefined; // falls back to FLEET tier constants in calculator
 
       const ab = await file.arrayBuffer();
       const wb = XLSX.read(ab, { type: "array", cellDates: true });
@@ -164,7 +176,8 @@ export default function AnalizaPage() {
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
           let frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
 
-          const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+          const vehicle       = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+          const naczepaReg    = get(row, "naczepa", "naczepa:", "naczepa ").toUpperCase();
           const originCountry = get(row, "zał. kraj", "zal. kraj", "kraj za").toUpperCase() || "PL";
           const destCountry = get(row, "roz. kraj", "kraj ro").toUpperCase() || "PL";
           const originCity = get(row, "zał. miasto", "zal. miasto");
@@ -175,6 +188,10 @@ export default function AnalizaPage() {
           const leasingEurMo          = leasingMap[vehicle];
           const insuranceEurMo        = insuranceMap[vehicle];
           const serviceCostKmOverride = serviceMap[vehicle];
+          // Trailer leasing: (1) exact naczepa from TMS, (2) fleet avg naczep, (3) tier in calculator
+          const trailerLeasingEurMo   = (naczepaReg && trailerLeasingMap[naczepaReg])
+            ? trailerLeasingMap[naczepaReg]
+            : fleetAvgTrailerLeasing;
 
           // Route days from TMS dates (pickup → delivery)
           // Columns: "Podjęcie" (load date) and "Dostarczenie" (delivery date)
@@ -222,6 +239,7 @@ export default function AnalizaPage() {
               fuelPriceEurL: fuelPrice, freightEur: 1,
               transitCountries: [originCountry, destCountry],
               avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+              trailerLeasingEurMo,
               insuranceEurMo, serviceCostKmOverride, routeDays,
               overrideTollEur: tmsTollEur || undefined,
             });
@@ -238,6 +256,7 @@ export default function AnalizaPage() {
             freightEur: frachtEur,
             transitCountries: [originCountry, destCountry],
             avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
+            trailerLeasingEurMo,
             insuranceEurMo, serviceCostKmOverride, routeDays,
             overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
           });
@@ -695,50 +714,4 @@ export default function AnalizaPage() {
                       title={r.tollFromTms
                         ? `Myto z TMS (DKV/viaTOLL): ${r.tollCost.toFixed(2)} EUR`
                         : `Myto z macierzy HBM · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
-                      {r.tollCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
-                      <div className={`text-xs font-medium ${r.tollFromTms ? "text-emerald-600" : "text-slate-400"}`}>
-                        {r.tollFromTms ? "✓ TMS" : `≈ macierz`}
-                      </div>
-                    </td>
-                    <td className="px-3 py-2.5 text-right text-slate-600">
-                      {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
-                    </td>
-                    <td className={`px-3 py-2.5 text-right font-bold text-lg ${
-                      r.noFreightData ? "text-slate-400" :
-                      r.marginPct >= 15 ? "text-emerald-600" :
-                      r.marginPct >= 5  ? "text-amber-600"   :
-                      r.marginPct >= 0  ? "text-orange-600"  : "text-red-600"}`}>
-                      {r.noFreightData ? "—" : `${r.marginPct}%`}
-                    </td>
-                    <td className="px-3 py-2.5 text-center">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[r.labelColor] ?? ""}`}>
-                        {r.label}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-xs text-slate-400 text-center">
-            Spalanie z Trimble per pojazd · Kurs PLN/EUR: {eurRate} · Paliwo: {fuelPrice} EUR/l
-            {verified.length > 0 && ` · ORS: ${verified.length} tras zweryfikowanych`}
-          </p>
-        </>
-      )}
-
-      {!loading && rows.length === 0 && !error && (
-        <div className="card text-center py-16">
-          <p className="text-4xl mb-3">📋</p>
-          <p className="text-slate-600 font-medium">Wgraj plik z trasami aby zobaczyć analizę</p>
-          <p className="text-sm text-slate-400 mt-1">
-            Format: eksport TMS — kolumny Nr pełny, Km ład. wg. mapy, Fracht z walutą, Ciągnik, Kraj/Miasto zał./roz.
-          </p>
-          <p className="text-xs text-slate-400 mt-2">
-            Po załadowaniu możesz uruchomić <strong>weryfikację ORS HGV</strong> — porówna km z TMS z rzeczywistą trasą ciężarówki
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
+                      {r.tollCost.t

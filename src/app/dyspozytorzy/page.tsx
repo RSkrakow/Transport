@@ -31,7 +31,7 @@ interface Vehicle {
 interface CostBreakdownDetail {
   fuel: number; adblue: number; idle: number;
   toll: number; driver: number; service: number;
-  leasing: number; insurance: number;
+  leasing: number; trailerLeasing: number; insurance: number;
 }
 
 interface RouteMetric {
@@ -188,6 +188,17 @@ export default function DyspozytorzyPage() {
     const vehMap: Record<string, Vehicle> = {};
     for (const v of vehicles) vehMap[v.reg] = v;
 
+    // Trailer leasing map: naczepa_reg → leasing EUR/mo
+    const trailerLeasingMap: Record<string, number> = {};
+    for (const v of vehicles) {
+      if (v.vehicle_type === "naczepa" && v.reg && v.leasing_eur_mo)
+        trailerLeasingMap[v.reg] = Number(v.leasing_eur_mo);
+    }
+    const allTrailerLeasings = Object.values(trailerLeasingMap);
+    const fleetAvgTrailerLeasing = allTrailerLeasings.length
+      ? allTrailerLeasings.reduce((a, b) => a + b, 0) / allTrailerLeasings.length
+      : undefined;
+
     const dispMap: Record<string, string> = {};
     for (const v of vehicles) {
       if (v.dispatcher_id) dispMap[v.reg] = v.dispatcher_id;
@@ -213,8 +224,9 @@ export default function DyspozytorzyPage() {
       let frachtEur = parseFracht(frachtRaw, eurRate);
       // NOTE: do NOT skip fracht=0 routes — estimate them like analiza does (see below)
 
-      const vehicle = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
-      const client  = get(row, "zleceniodawca", "klient", "nadawca") || "—";
+      const vehicle    = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+      const naczepaReg = get(row, "naczepa", "naczepa:", "naczepa ").toUpperCase();
+      const client     = get(row, "zleceniodawca", "klient", "nadawca") || "—";
       const originCountry = get(row, "zał. kraj", "zal. kraj", "kraj za").toUpperCase() || "PL";
       const destCountry   = get(row, "roz. kraj", "kraj ro").toUpperCase() || "PL";
 
@@ -247,6 +259,11 @@ export default function DyspozytorzyPage() {
         }
       }
 
+      // Trailer leasing: (1) exact naczepa from TMS row, (2) fleet avg, (3) tier in calculator
+      const trailerLeasingEurMo = (naczepaReg && trailerLeasingMap[naczepaReg])
+        ? trailerLeasingMap[naczepaReg]
+        : fleetAvgTrailerLeasing;
+
       const calcBase = {
         originCountry, destCountry, distanceKm, emptyKm,
         fuelPriceEurL: fuelPrice,
@@ -254,6 +271,7 @@ export default function DyspozytorzyPage() {
         avgFuelL100: vData?.avg_fuel_l100 ?? FLEET.avgFuelL100,
         vehicleYearProduced: vData?.year_produced ?? undefined,
         leasingEurMo: vData?.leasing_eur_mo ?? undefined,
+        trailerLeasingEurMo,
         insuranceEurMo: vData?.insurance_eur_mo ?? undefined,
         serviceCostKmOverride: vData?.service_cost_km ?? undefined,
         routeDays,
@@ -290,7 +308,7 @@ export default function DyspozytorzyPage() {
         breakdown: {
           fuel: bd.fuel, adblue: bd.adblue, idle: bd.idle,
           toll: bd.toll, driver: bd.driver, service: bd.service,
-          leasing: bd.leasing, insurance: bd.insurance,
+          leasing: bd.leasing, trailerLeasing: bd.trailerLeasing, insurance: bd.insurance,
         },
         costPerKm: bd.costPerKm,
         revenuePerKm: bd.revenuePerKm,
@@ -914,8 +932,9 @@ export default function DyspozytorzyPage() {
           { key: "Paliwo",      val: bd.fuel,      icon: "⛽", color: "bg-orange-500" },
           { key: "Kierowca",    val: bd.driver,    icon: "👤", color: "bg-blue-500" },
           { key: "Myto",        val: bd.toll,      icon: "🛣️", color: "bg-purple-500" },
-          { key: "Leasing",     val: bd.leasing,   icon: "💳", color: "bg-teal-500" },
-          { key: "Ubezp.",      val: bd.insurance, icon: "🛡️", color: "bg-indigo-500" },
+          { key: "Leasing cią.", val: bd.leasing,         icon: "💳", color: "bg-teal-500" },
+          { key: "Leasing nacz.", val: bd.trailerLeasing, icon: "🚛", color: "bg-teal-400" },
+          { key: "Ubezp.",        val: bd.insurance,     icon: "🛡️", color: "bg-indigo-500" },
           { key: "Serwis",      val: bd.service,   icon: "🔧", color: "bg-slate-500" },
           { key: "AdBlue",      val: bd.adblue,    icon: "🔵", color: "bg-cyan-500" },
           { key: "Postój",      val: bd.idle,      icon: "⏸️", color: "bg-yellow-500" },
@@ -944,8 +963,9 @@ export default function DyspozytorzyPage() {
           diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — ${r.routeDays} ${r.routeDays===1?"doba":"doby"} × 181,95 EUR = ${Math.round(bd.driver)} EUR przy frachcie ${Math.round(r.frachtEur)} EUR`);
         if (r.distanceKm < 300)
           diagnoses.push(`Krótka trasa (${Math.round(r.distanceKm)} km) — wysokie koszty stałe (leasing, ubezp.) na małej odległości`);
-        if (bd.leasing / r.frachtEur > 0.20)
-          diagnoses.push(`Leasing pochłania ${(bd.leasing/r.frachtEur*100).toFixed(0)}% frachtu — pojazd za drogi do tej trasy`);
+        const totalLeasing = bd.leasing + bd.trailerLeasing;
+        if (totalLeasing / r.frachtEur > 0.20)
+          diagnoses.push(`Leasing (cią. + nacz.) pochłania ${(totalLeasing/r.frachtEur*100).toFixed(0)}% frachtu — ${Math.round(totalLeasing)} € na tej trasie`);
         if (diagnoses.length === 0) {
           if (r.marginEur < 0)
             diagnoses.push(`Łączne koszty (${Math.round(r.totalCost)} €) przekraczają fracht (${Math.round(r.frachtEur)} €) o ${Math.abs(Math.round(r.marginEur))} €`);
@@ -1028,62 +1048,4 @@ export default function DyspozytorzyPage() {
                   {/* Total */}
                   <div className="flex items-center gap-3 border-t pt-2">
                     <span className="text-xs w-20 text-right font-bold text-slate-700">RAZEM</span>
-                    <div className="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
-                      <div className="h-full bg-red-600 rounded-full"
-                        style={{width:`${Math.min((r.totalCost/r.frachtEur)*100,150)}%`}} />
-                    </div>
-                    <span className="text-xs w-20 font-bold text-red-700">{Math.round(r.totalCost)} €</span>
-                    <span className="text-xs w-10 text-red-600 font-bold">
-                      {r.frachtEur>0?(r.totalCost/r.frachtEur*100).toFixed(0):0}%
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Per-km */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-slate-50 rounded-xl p-3 text-center">
-                  <div className="text-xs text-slate-500 mb-1">Koszt HBM / km</div>
-                  <div className={`text-xl font-bold ${r.costPerKm > 1.7 ? "text-red-600" : "text-slate-800"}`}>
-                    {r.costPerKm.toFixed(2)} €/km
-                  </div>
-                  <div className="text-xs text-slate-400">śr. flota ~1.50–1.70 €/km</div>
-                </div>
-                <div className="bg-slate-50 rounded-xl p-3 text-center">
-                  <div className="text-xs text-slate-500 mb-1">Fracht / km</div>
-                  <div className={`text-xl font-bold ${r.revenuePerKm < 1.5 ? "text-red-600" : "text-emerald-600"}`}>
-                    {r.revenuePerKm.toFixed(2)} €/km
-                  </div>
-                  <div className="text-xs text-slate-400">min. rentowność ~1.80 €/km</div>
-                </div>
-              </div>
-
-              {/* Break-even */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                <p className="text-xs font-bold text-blue-700 uppercase tracking-wide mb-3">📈 Co musi się zmienić?</p>
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="text-center">
-                    <div className="text-lg font-black text-blue-800">{freightForZero.toLocaleString("pl-PL")} €</div>
-                    <div className="text-xs text-blue-600">fracht na próg 0%</div>
-                    <div className="text-xs text-slate-500 mt-0.5">+{freightDeltaZero.toLocaleString("pl-PL")} € do obecnego</div>
-                  </div>
-                  <div className="text-center">
-                    <div className="text-lg font-black text-emerald-700">{freightFor15.toLocaleString("pl-PL")} €</div>
-                    <div className="text-xs text-emerald-600">fracht na marżę 15%</div>
-                    <div className="text-xs text-slate-500 mt-0.5">+{freightDelta15.toLocaleString("pl-PL")} € do obecnego</div>
-                  </div>
-                </div>
-              </div>
-
-              <button onClick={() => setAnalysisRoute(null)}
-                className="w-full py-2.5 border border-slate-200 text-slate-600 text-sm rounded-xl hover:border-slate-400 transition-colors">
-                Zamknij
-              </button>
-            </div>
-          </div>
-        </div>
-        );
-      })()}
-    </div>
-  );
-}
+                    <div className="flex-1 bg-slate-100 rounded-full
