@@ -4,14 +4,19 @@ import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface Vehicle {
-  id: number;
+  id: string;
   reg: string;
   brand: string | null;
   model: string | null;
+  vehicle_type: string | null;
   year_produced: number | null;
   odometer_km: number | null;
   avg_fuel_l100: number | null;
   leasing_eur_mo: number | null;
+  leasing_brutto_eur_mo: number | null;
+  insurance_eur_mo: number | null;
+  service_cost_km: number | null;
+  avg_km_month: number | null;
   is_active: boolean;
 }
 
@@ -34,10 +39,65 @@ export default function FleetPage() {
   const [sortKey, setSortKey] = useState<SortKey>("reg");
   const [sortDesc, setSortDesc] = useState(false);
 
-  useEffect(() => {
-    supabase.from("vehicles").select("*").eq("is_active", true)
-      .then(({ data }) => { setVehicles(data ?? []); setLoading(false); });
-  }, []);
+  const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => { loadVehicles(); }, []);
+
+  async function loadVehicles() {
+    const { data } = await supabase
+      .from("vehicles")
+      .select("id,reg,brand,model,vehicle_type,year_produced,odometer_km,avg_fuel_l100,leasing_eur_mo,leasing_brutto_eur_mo,insurance_eur_mo,service_cost_km,avg_km_month,is_active")
+      .eq("is_active", true)
+      .order("vehicle_type,reg");
+    setVehicles(data ?? []);
+    setLoading(false);
+  }
+
+  async function saveVehicle(v: Vehicle) {
+    setSaving(true);
+    await supabase.from("vehicles").update({
+      brand:                v.brand,
+      model:                v.model,
+      year_produced:        v.year_produced,
+      odometer_km:          v.odometer_km,
+      avg_fuel_l100:        v.avg_fuel_l100,
+      leasing_eur_mo:       v.leasing_eur_mo,
+      leasing_brutto_eur_mo: v.leasing_brutto_eur_mo,
+      insurance_eur_mo:     v.insurance_eur_mo,
+      service_cost_km:      v.service_cost_km,
+      avg_km_month:         v.avg_km_month,
+    }).eq("id", v.id);
+    setSaving(false);
+    setEditVehicle(null);
+    await loadVehicles();
+  }
+
+  function numField(label: string, field: keyof Vehicle, unit = "", step = "1") {
+    if (!editVehicle) return null;
+    const val = editVehicle[field] as number | null;
+    return (
+      <label className="block">
+        <span className="text-xs text-slate-500">{label}{unit ? ` (${unit})` : ""}</span>
+        <input type="number" step={step} value={val ?? ""}
+          onChange={e => setEditVehicle({...editVehicle, [field]: e.target.value ? +e.target.value : null})}
+          className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+      </label>
+    );
+  }
+
+  function txtField(label: string, field: keyof Vehicle) {
+    if (!editVehicle) return null;
+    const val = editVehicle[field] as string | null;
+    return (
+      <label className="block">
+        <span className="text-xs text-slate-500">{label}</span>
+        <input type="text" value={val ?? ""}
+          onChange={e => setEditVehicle({...editVehicle, [field]: e.target.value || null})}
+          className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+      </label>
+    );
+  }
 
   const brands = useMemo(() =>
     ["all", ...Array.from(new Set(vehicles.map(v => v.brand ?? "—").filter(Boolean))).sort()],
@@ -241,7 +301,7 @@ export default function FleetPage() {
                 ["year_produced", "Rok"],
                 ["odometer_km", "Licznik (km)"],
                 ["avg_fuel_l100", "Spalanie"],
-                ["leasing_eur_mo", "Leasing EUR/mies."],
+                ["leasing_eur_mo", "Leasing netto EUR/mc"],
               ] as [SortKey, string][]).map(([key, label]) => (
                 <th key={key}
                   onClick={() => toggleSort(key)}
@@ -249,11 +309,13 @@ export default function FleetPage() {
                   {label}<SortIcon k={key} />
                 </th>
               ))}
+              <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ubezp. EUR/mc</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold text-slate-400 uppercase w-20"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-400 text-sm">Brak pojazdów spełniających kryteria</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400 text-sm">Brak pojazdów spełniających kryteria</td></tr>
             ) : filtered.map(v => (
               <tr key={v.id} className={`hover:bg-slate-50 transition-colors ${odoColor(v.odometer_km)}`}>
                 <td className="px-4 py-3 font-mono font-semibold text-slate-800">{v.reg}</td>
@@ -279,9 +341,23 @@ export default function FleetPage() {
                     : <span className="text-slate-400">—</span>}
                 </td>
                 <td className="px-4 py-3">
-                  {v.leasing_eur_mo && v.leasing_eur_mo > 50
-                    ? <span className="font-medium text-slate-700">{fmt(Math.round(v.leasing_eur_mo))} EUR</span>
-                    : <span className="text-slate-400 text-xs">brak / spłacony</span>}
+                  {v.leasing_eur_mo && v.leasing_eur_mo > 50 ? (
+                    <div>
+                      <span className="font-medium text-slate-700">{fmt(Math.round(v.leasing_eur_mo))} EUR</span>
+                      {v.leasing_brutto_eur_mo && <div className="text-xs text-slate-400">brutto: {fmt(Math.round(v.leasing_brutto_eur_mo))}</div>}
+                    </div>
+                  ) : <span className="text-slate-400 text-xs">brak / spłacony</span>}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  {v.insurance_eur_mo && v.insurance_eur_mo > 0
+                    ? <span className="text-slate-700 text-sm">{fmt(Math.round(v.insurance_eur_mo))}</span>
+                    : <span className="text-slate-400 text-xs">—</span>}
+                </td>
+                <td className="px-4 py-3 text-center">
+                  <button onClick={() => setEditVehicle({...v})}
+                    className="px-3 py-1 text-xs bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg font-medium transition-colors">
+                    Edytuj
+                  </button>
                 </td>
               </tr>
             ))}
@@ -304,6 +380,71 @@ export default function FleetPage() {
           </div>
         )}
       </div>
+      {/* Edit Modal */}
+      {editVehicle && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+          onClick={e => e.target === e.currentTarget && setEditVehicle(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-800">{editVehicle.reg}</h2>
+                <p className="text-xs text-slate-400">{editVehicle.vehicle_type ?? "pojazd"}</p>
+              </div>
+              <button onClick={() => setEditVehicle(null)} className="text-slate-400 hover:text-slate-700 text-xl">✕</button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Dane podstawowe */}
+              <div className="col-span-2 border-t pt-3">
+                <p className="text-xs font-bold text-slate-600 uppercase tracking-wide mb-2">📋 Dane podstawowe</p>
+              </div>
+              {txtField("Marka", "brand")}
+              {txtField("Model", "model")}
+              {numField("Rok produkcji", "year_produced")}
+              {numField("Licznik (km)", "odometer_km")}
+              {numField("Śr. spalanie (l/100km)", "avg_fuel_l100", "l/100", "0.01")}
+              {numField("Śr. km / miesiąc", "avg_km_month")}
+
+              {/* Koszty */}
+              <div className="col-span-2 border-t pt-3">
+                <p className="text-xs font-bold text-amber-600 uppercase tracking-wide mb-2">💳 Leasing</p>
+              </div>
+              {numField("Leasing brutto EUR/mc", "leasing_brutto_eur_mo", "EUR", "0.01")}
+              <label className="block">
+                <span className="text-xs text-slate-500">Leasing netto EUR/mc <span className="text-slate-400">(brutto/1.23)</span></span>
+                <input type="number" step="0.01"
+                  value={editVehicle.leasing_eur_mo ?? ""}
+                  onChange={e => setEditVehicle({...editVehicle, leasing_eur_mo: e.target.value ? +e.target.value : null})}
+                  className="mt-1 w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+                {editVehicle.leasing_brutto_eur_mo && (
+                  <button type="button" onClick={() => setEditVehicle({...editVehicle,
+                    leasing_eur_mo: Math.round(editVehicle.leasing_brutto_eur_mo! / 1.23 * 100) / 100})}
+                    className="mt-1 text-xs text-blue-600 hover:underline">
+                    ← Oblicz z brutto ({Math.round(editVehicle.leasing_brutto_eur_mo / 1.23 * 100) / 100} EUR)
+                  </button>
+                )}
+              </label>
+
+              <div className="col-span-2 border-t pt-3">
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-2">🛡️ Ubezpieczenie & Serwis</p>
+              </div>
+              {numField("OC+AC EUR/mc", "insurance_eur_mo", "EUR", "0.01")}
+              {numField("Serwis EUR/km", "service_cost_km", "EUR/km", "0.001")}
+            </div>
+
+            <div className="flex gap-3 pt-2">
+              <button onClick={() => saveVehicle(editVehicle)} disabled={saving}
+                className="flex-1 py-2.5 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                {saving ? "Zapisuję…" : "Zapisz zmiany"}
+              </button>
+              <button onClick={() => setEditVehicle(null)}
+                className="px-6 py-2.5 border border-slate-200 text-slate-600 text-sm rounded-xl hover:border-slate-400 transition-colors">
+                Anuluj
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

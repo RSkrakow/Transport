@@ -46,6 +46,7 @@ interface RouteMetric {
   emptyKm?: number;
   frachtEur: number;
   frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from margin/km
+  noFreightData: boolean;     // true when fracht=0 AND no TMS margin — no invoice data at all
   totalCost: number;
   marginEur: number;
   marginPct: number;
@@ -262,14 +263,17 @@ export default function DyspozytorzyPage() {
       // Estimate fracht when TMS has no invoice yet (fracht=0), using TMS margin/km
       // Unified with analiza/page.tsx logic
       let frachtEstimated = false;
+      let noFreightData = false;
       if (frachtEur === 0 && tmsMarzaPerKm > 0) {
         const bd0 = calculateRoute({ ...calcBase, freightEur: 1 });
         frachtEur = Math.round((bd0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
         frachtEstimated = true;
+      } else if (frachtEur === 0) {
+        // No invoice AND no TMS margin hint — include as "brak danych" (costs are real, revenue unknown)
+        noFreightData = true;
       }
-      // Skip routes with truly no data (no invoice AND no TMS margin hint)
-      if (frachtEur === 0) continue;
 
+      // Always calculate costs — even when fracht=0 we want to show the cost exposure
       const bd = calculateRoute({ ...calcBase, freightEur: frachtEur });
 
       const disp_id = dispMap[vehicle] ?? null;
@@ -278,10 +282,10 @@ export default function DyspozytorzyPage() {
         dispatcher_id: disp_id,
         dispatcherName: disp_id ? (dispNameMap[disp_id] ?? "—") : "Nieprzypisany",
         originCountry, destCountry, distanceKm, emptyKm,
-        frachtEur, frachtEstimated,
+        frachtEur, frachtEstimated, noFreightData,
         totalCost: bd.total, marginEur: bd.marginEur,
         marginPct: bd.marginPct, tollEur: bd.toll,
-        label: bd.marginPct >= 15 ? "Rentowna" : bd.marginPct >= 5 ? "Niska marża" : bd.marginPct >= 0 ? "Próg" : "STRATA",
+        label: noFreightData ? "BRAK DANYCH" : bd.marginPct >= 15 ? "Rentowna" : bd.marginPct >= 5 ? "Niska marża" : bd.marginPct >= 0 ? "Próg" : "STRATA",
         routeDays: bd.routeDays,
         breakdown: {
           fuel: bd.fuel, adblue: bd.adblue, idle: bd.idle,
@@ -594,10 +598,11 @@ export default function DyspozytorzyPage() {
 
                     {/* Mini bar */}
                     <div className="mt-3 flex gap-1 text-xs flex-wrap">
-                      {filteredRoutes.filter(r=>r.marginPct>=15).length>0 && <div className="bg-emerald-500 text-white rounded px-1.5 py-0.5">✓ {filteredRoutes.filter(r=>r.marginPct>=15).length}</div>}
-                      {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15).length>0 && <div className="bg-amber-400 text-white rounded px-1.5 py-0.5">~ {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15).length}</div>}
-                      {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5).length>0 && <div className="bg-orange-400 text-white rounded px-1.5 py-0.5">↓ {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5).length}</div>}
-                      {filteredRoutes.filter(r=>r.marginPct<0).length>0 && <div className="bg-red-600 text-white rounded px-1.5 py-0.5 font-bold">✗ {filteredRoutes.filter(r=>r.marginPct<0).length} STRAT</div>}
+                      {filteredRoutes.filter(r=>r.marginPct>=15&&!r.noFreightData).length>0 && <div className="bg-emerald-500 text-white rounded px-1.5 py-0.5">✓ {filteredRoutes.filter(r=>r.marginPct>=15&&!r.noFreightData).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15&&!r.noFreightData).length>0 && <div className="bg-amber-400 text-white rounded px-1.5 py-0.5">~ {filteredRoutes.filter(r=>r.marginPct>=5&&r.marginPct<15&&!r.noFreightData).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5&&!r.noFreightData).length>0 && <div className="bg-orange-400 text-white rounded px-1.5 py-0.5">↓ {filteredRoutes.filter(r=>r.marginPct>=0&&r.marginPct<5&&!r.noFreightData).length}</div>}
+                      {filteredRoutes.filter(r=>r.marginPct<0&&!r.noFreightData).length>0 && <div className="bg-red-600 text-white rounded px-1.5 py-0.5 font-bold">✗ {filteredRoutes.filter(r=>r.marginPct<0&&!r.noFreightData).length} STRAT</div>}
+                      {filteredRoutes.filter(r=>r.noFreightData).length>0 && <div className="bg-slate-300 text-slate-700 rounded px-1.5 py-0.5">? {filteredRoutes.filter(r=>r.noFreightData).length} BD</div>}
                       {filteredRoutes.length===0 && <div className="text-slate-400 italic">brak tras w tym tygodniu</div>}
                     </div>
                   </div>
@@ -696,7 +701,7 @@ export default function DyspozytorzyPage() {
                       {selectedKpi.routeList.sort((a,b)=>a.marginPct-b.marginPct).map(r => (
                         <tr key={r.orderNr}
                           onClick={() => setAnalysisRoute(r)}
-                          className={`cursor-pointer hover:bg-blue-50/30 ${r.marginPct<0?"bg-red-50/30":""}`}>
+                          className={`cursor-pointer hover:bg-blue-50/30 ${r.noFreightData?"bg-slate-50/60":r.marginPct<0?"bg-red-50/30":""}`}>
                           <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
                           <td className="px-4 py-2 text-xs text-slate-700 max-w-[140px] truncate" title={r.client}>{r.client}</td>
                           <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
@@ -705,15 +710,16 @@ export default function DyspozytorzyPage() {
                             {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays}d</span>
                           </td>
                           <td className="px-4 py-2 text-right text-xs font-medium">
-                            {Math.round(r.frachtEur).toLocaleString("pl-PL")}
+                            {r.noFreightData ? <span className="text-slate-400 italic">brak fraktury</span> : Math.round(r.frachtEur).toLocaleString("pl-PL")}
                             {r.frachtEstimated && <div className="text-amber-500 text-[10px] font-normal">~szacowany</div>}
                           </td>
                           <td className="px-4 py-2 text-right text-xs">{Math.round(r.totalCost).toLocaleString("pl-PL")}</td>
-                          <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>
-                            {fmtPct(r.marginPct)}
+                          <td className={`px-4 py-2 text-right text-xs font-bold ${r.noFreightData?"text-slate-400":marginColor(r.marginPct)}`}>
+                            {r.noFreightData ? "—" : fmtPct(r.marginPct)}
                           </td>
                           <td className="px-4 py-2 text-center">
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
+                              r.noFreightData?"bg-slate-100 text-slate-500":
                               r.marginPct>=15?"bg-emerald-100 text-emerald-700":
                               r.marginPct>=5?"bg-amber-100 text-amber-700":
                               r.marginPct>=0?"bg-orange-100 text-orange-700":
@@ -783,7 +789,7 @@ export default function DyspozytorzyPage() {
                   .map(r => {
                     const vType = vehicles.find(v=>v.reg===r.vehicle)?.vehicle_type;
                     return (
-                    <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.marginPct<0?"bg-red-50/40":""}`}>
+                    <tr key={r.orderNr} className={`hover:bg-slate-50 ${r.noFreightData?"bg-slate-50/60":r.marginPct<0?"bg-red-50/40":""}`}>
                       <td className="px-4 py-2 font-mono text-xs text-slate-600">{r.orderNr}</td>
                       <td className="px-4 py-2 text-xs text-slate-700 max-w-[150px] truncate" title={r.client}>{r.client}</td>
                       <td className="px-4 py-2 text-xs font-medium text-slate-700">{r.dispatcherName}</td>
@@ -794,10 +800,15 @@ export default function DyspozytorzyPage() {
                         </span>
                       </td>
                       <td className="px-4 py-2 text-xs">{r.originCountry}→{r.destCountry}</td>
-                      <td className="px-4 py-2 text-right text-xs">{Math.round(r.frachtEur).toLocaleString("pl-PL")} €</td>
-                      <td className={`px-4 py-2 text-right text-xs font-bold ${marginColor(r.marginPct)}`}>{fmtPct(r.marginPct)}</td>
+                      <td className="px-4 py-2 text-right text-xs">
+                        {r.noFreightData ? <span className="text-slate-400 italic">brak faktury</span> : <>{Math.round(r.frachtEur).toLocaleString("pl-PL")} €</>}
+                      </td>
+                      <td className={`px-4 py-2 text-right text-xs font-bold ${r.noFreightData?"text-slate-400":marginColor(r.marginPct)}`}>
+                        {r.noFreightData ? "—" : fmtPct(r.marginPct)}
+                      </td>
                       <td className="px-4 py-2 text-center">
                         <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          r.noFreightData?"bg-slate-100 text-slate-500":
                           r.marginPct>=15?"bg-emerald-100 text-emerald-700":r.marginPct>=5?"bg-amber-100 text-amber-700":
                           r.marginPct>=0?"bg-orange-100 text-orange-700":"bg-red-100 text-red-700 font-bold"}`}>
                           {r.label}

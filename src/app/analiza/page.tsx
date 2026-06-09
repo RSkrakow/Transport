@@ -27,6 +27,7 @@ interface RouteRow {
   frachtRaw: string;
   frachtEur: number;
   frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from TMS margin/km
+  noFreightData: boolean;     // true when fracht=0 AND no TMS margin/km — unknown revenue
   currency: string;
   avgFuelL100: number;
   tmsMarzaPerKm: number;      // "Marża EUR na 1 KM z mapy" from TMS
@@ -214,6 +215,7 @@ export default function AnalizaPage() {
 
           // Estimate fracht when TMS has no invoice yet (fracht=0)
           let frachtEstimated = false;
+          let noFreightData = false;
           if (frachtEur === 0 && tmsMarzaPerKm > 0) {
             const breakdown0 = calculateRoute({
               originCountry, destCountry, distanceKm, emptyKm,
@@ -225,6 +227,9 @@ export default function AnalizaPage() {
             });
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
             frachtEstimated = true;
+          } else if (frachtEur === 0) {
+            // No invoice AND no TMS margin hint — show as BRAK DANYCH (costs visible, revenue unknown)
+            noFreightData = true;
           }
 
           const breakdown = calculateRoute({
@@ -237,7 +242,9 @@ export default function AnalizaPage() {
             overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
           });
 
-          const { label, color } = profitabilityLabel(breakdown.marginPct);
+          const { label, color } = noFreightData
+            ? { label: "BRAK DANYCH", color: "slate" }
+            : profitabilityLabel(breakdown.marginPct);
 
           return {
             orderNr,
@@ -246,7 +253,7 @@ export default function AnalizaPage() {
             originCountry, destCountry, originCity, destCity,
             distanceKm, frachtRaw,
             frachtEur: Math.round(frachtEur * 100) / 100,
-            frachtEstimated,
+            frachtEstimated, noFreightData,
             currency, avgFuelL100, tmsMarzaPerKm,
             marginEur: breakdown.marginEur,
             marginPct: breakdown.marginPct,
@@ -344,9 +351,9 @@ export default function AnalizaPage() {
   const SortIcon = ({ k }: { k: keyof RouteRow }) =>
     sortKey === k ? <span className="ml-1">{sortDesc ? "↓" : "↑"}</span> : null;
 
-  const estimatedCount = rows.filter(r => r.frachtEstimated).length;
-  const noFreightCount = rows.filter(r => r.frachtEur === 0 && !r.frachtEstimated).length;
-  const displayRows    = hideEstimated ? rows.filter(r => !r.frachtEstimated) : rows;
+  const estimatedCount  = rows.filter(r => r.frachtEstimated).length;
+  const noFreightCount  = rows.filter(r => r.noFreightData).length;
+  const displayRows     = hideEstimated ? rows.filter(r => !r.frachtEstimated) : rows;
 
   const sorted = [...displayRows].sort((a, b) => {
     const av = a[sortKey]; const bv = b[sortKey];
@@ -355,10 +362,10 @@ export default function AnalizaPage() {
     return String(av).localeCompare(String(bv));
   });
 
-  const profitable  = displayRows.filter(r => r.marginPct >= 15).length;
-  const lowMargin   = displayRows.filter(r => r.marginPct >= 5 && r.marginPct < 15).length;
-  const breakeven   = displayRows.filter(r => r.marginPct >= 0 && r.marginPct < 5).length;
-  const losses      = displayRows.filter(r => r.marginPct < 0).length;
+  const profitable  = displayRows.filter(r => r.marginPct >= 15  && !r.noFreightData).length;
+  const lowMargin   = displayRows.filter(r => r.marginPct >= 5   && r.marginPct < 15 && !r.noFreightData).length;
+  const breakeven   = displayRows.filter(r => r.marginPct >= 0   && r.marginPct < 5  && !r.noFreightData).length;
+  const losses      = displayRows.filter(r => r.marginPct < 0    && !r.noFreightData).length;
   const totalFreight = displayRows.reduce((s, r) => s + r.frachtEur, 0);
   const totalCosts   = displayRows.reduce((s, r) => s + r.totalCost, 0);
   const totalMargin  = totalFreight - totalCosts;
@@ -378,12 +385,14 @@ export default function AnalizaPage() {
     amber:   "bg-amber-100 text-amber-800",
     orange:  "bg-orange-100 text-orange-800",
     red:     "bg-red-100 text-red-800",
+    slate:   "bg-slate-100 text-slate-600",
   };
   const borderMap: Record<string, string> = {
     emerald: "border-l-4 border-emerald-400",
     amber:   "border-l-4 border-amber-400",
     orange:  "border-l-4 border-orange-400",
     red:     "border-l-4 border-red-400",
+    slate:   "border-l-4 border-slate-300",
   };
 
   return (
@@ -490,7 +499,7 @@ export default function AnalizaPage() {
             <span className="text-amber-600 font-bold">⚠️</span>
             <span className="text-amber-800">
               <strong>{estimatedCount} tras</strong> bez faktury w TMS — fracht szacowany z marży TMS (koszt HBM + marża TMS/km).
-              {noFreightCount > 0 && <span className="ml-2 text-amber-600">+{noFreightCount} bez danych — pominięte.</span>}
+              {noFreightCount > 0 && <span className="ml-2 text-amber-600">+{noFreightCount} z zerowym frachtem — brak faktury i marży TMS (widoczne jako BRAK DANYCH).</span>}
             </span>
           </div>
           <button
@@ -536,7 +545,7 @@ export default function AnalizaPage() {
       {/* KPI */}
       {rows.length > 0 && (
         <>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <div className="card border-l-4 border-emerald-500">
               <p className="text-xs text-slate-500 uppercase tracking-wide">Rentowne ≥15%</p>
               <p className="text-3xl font-bold text-emerald-600 mt-1">{profitable}</p>
@@ -553,6 +562,12 @@ export default function AnalizaPage() {
               <p className="text-xs text-slate-500 uppercase tracking-wide">Strata</p>
               <p className="text-3xl font-bold text-red-600 mt-1">{losses}</p>
             </div>
+            {noFreightCount > 0 && (
+              <div className="card border-l-4 border-slate-300">
+                <p className="text-xs text-slate-500 uppercase tracking-wide">Brak danych</p>
+                <p className="text-3xl font-bold text-slate-500 mt-1">{noFreightCount}</p>
+              </div>
+            )}
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -664,13 +679,15 @@ export default function AnalizaPage() {
                       </>
                     )}
                     <td className="px-3 py-2.5 text-right font-semibold text-slate-800">
-                      {r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      {r.noFreightData
+                        ? <span className="text-slate-400 italic text-xs font-normal">brak faktury</span>
+                        : r.frachtEur.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
                       {r.frachtEstimated && (
                         <div className="text-xs text-amber-500 font-normal" title={`Szacowany: koszt HBM + marża TMS ${r.tmsMarzaPerKm} EUR/km`}>
                           ~szacowany
                         </div>
                       )}
-                      {r.currency === "PLN" && !r.frachtEstimated && (
+                      {r.currency === "PLN" && !r.frachtEstimated && !r.noFreightData && (
                         <div className="text-xs text-slate-400 font-normal">{r.frachtRaw}</div>
                       )}
                     </td>
@@ -687,10 +704,11 @@ export default function AnalizaPage() {
                       {r.totalCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
                     </td>
                     <td className={`px-3 py-2.5 text-right font-bold text-lg ${
+                      r.noFreightData ? "text-slate-400" :
                       r.marginPct >= 15 ? "text-emerald-600" :
                       r.marginPct >= 5  ? "text-amber-600"   :
                       r.marginPct >= 0  ? "text-orange-600"  : "text-red-600"}`}>
-                      {r.marginPct}%
+                      {r.noFreightData ? "—" : `${r.marginPct}%`}
                     </td>
                     <td className="px-3 py-2.5 text-center">
                       <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${colorMap[r.labelColor] ?? ""}`}>
