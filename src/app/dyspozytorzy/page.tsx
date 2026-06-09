@@ -946,8 +946,17 @@ export default function DyspozytorzyPage() {
           diagnoses.push(`Krótka trasa (${Math.round(r.distanceKm)} km) — wysokie koszty stałe (leasing, ubezp.) na małej odległości`);
         if (bd.leasing / r.frachtEur > 0.20)
           diagnoses.push(`Leasing pochłania ${(bd.leasing/r.frachtEur*100).toFixed(0)}% frachtu — pojazd za drogi do tej trasy`);
-        if (diagnoses.length === 0)
-          diagnoses.push(`Łączne koszty (${Math.round(r.totalCost)} €) przekraczają fracht (${Math.round(r.frachtEur)} €) o ${Math.abs(Math.round(r.marginEur))} €`);
+        if (diagnoses.length === 0) {
+          if (r.marginEur < 0)
+            diagnoses.push(`Łączne koszty (${Math.round(r.totalCost)} €) przekraczają fracht (${Math.round(r.frachtEur)} €) o ${Math.abs(Math.round(r.marginEur))} €`);
+          else
+            diagnoses.push(`Marża ${fmtPct(r.marginPct)} — koszty (${Math.round(r.totalCost)} €) poniżej frachtu (${Math.round(r.frachtEur)} €), rezerwa ${Math.round(r.marginEur)} €`);
+        }
+
+        const isLoss = r.marginPct < 0;
+        const diagColor = isLoss
+          ? { bg: "bg-red-50", border: "border-red-200", title: "text-red-700", text: "text-red-800", arrow: "text-red-500" }
+          : { bg: "bg-amber-50", border: "border-amber-200", title: "text-amber-700", text: "text-amber-800", arrow: "text-amber-500" };
 
         return (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
@@ -970,12 +979,14 @@ export default function DyspozytorzyPage() {
 
             <div className="p-6 space-y-5">
               {/* Diagnosis */}
-              <div className="bg-red-50 border border-red-200 rounded-xl p-4">
-                <p className="text-xs font-bold text-red-700 uppercase tracking-wide mb-2">🔍 Diagnoza przyczyny straty</p>
+              <div className={`${diagColor.bg} border ${diagColor.border} rounded-xl p-4`}>
+                <p className={`text-xs font-bold ${diagColor.title} uppercase tracking-wide mb-2`}>
+                  🔍 {isLoss ? "Diagnoza przyczyny straty" : "Analiza kosztów trasy"}
+                </p>
                 <ul className="space-y-1.5">
                   {diagnoses.map((d,i) => (
-                    <li key={i} className="flex items-start gap-2 text-sm text-red-800">
-                      <span className="text-red-500 mt-0.5">→</span>{d}
+                    <li key={i} className={`flex items-start gap-2 text-sm ${diagColor.text}`}>
+                      <span className={`${diagColor.arrow} mt-0.5`}>→</span>{d}
                     </li>
                   ))}
                 </ul>
