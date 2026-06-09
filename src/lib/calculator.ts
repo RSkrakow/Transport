@@ -129,8 +129,28 @@ const EURO_MULTIPLIER: Record<number, Record<string, number>> = {
   3: { DE: 1.57, AT: 1.40, CH: 1.15 },
 };
 
+// ─── Calc settings (from /konfiguracja, stored in Supabase) ──────────────────
+export interface CalcSettings {
+  leasingMethod:        'per_dobe' | 'per_km';  // alokacja leasing ciągnika
+  trailerLeasingMethod: 'per_dobe' | 'per_km';  // alokacja leasing naczepy
+  insuranceMethod:      'per_dobe' | 'per_km';  // alokacja ubezpieczenie
+  avgFuelL100?:      number;  // spalanie flotowe (nadpisuje FLEET)
+  driverDailyCost?:  number;  // koszt kierowcy EUR/dobę
+  adblueRatePct?:    number;  // AdBlue % paliwa
+  idleFuelPct?:      number;  // bieg jałowy % paliwa
+  avgKmPerMonth?:    number;  // km/miesiąc fallback
+  marginGoodPct?:    number;  // >= rentowna (%)
+  marginLowPct?:     number;  // >= niska marża (%)
+}
+
+export const DEFAULT_CALC_SETTINGS: CalcSettings = {
+  leasingMethod:        'per_km',
+  trailerLeasingMethod: 'per_km',
+  insuranceMethod:      'per_km',
+};
+
 // ─── Main calculation ─────────────────────────────────────────
-export function calculateRoute(input: RouteInput): CostBreakdown {
+export function calculateRoute(input: RouteInput, settings?: CalcSettings): CostBreakdown {
   const {
     distanceKm,
     fuelPriceEurL,
@@ -142,7 +162,10 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     vehicleYearProduced,
   } = input;
 
-  const fuelL100 = input.avgFuelL100 ?? FLEET.avgFuelL100;
+  const s = settings ?? DEFAULT_CALC_SETTINGS;
+  const fleetAvgKmMo = s.avgKmPerMonth ?? FLEET.avgKmPerMonth;
+
+  const fuelL100 = input.avgFuelL100 ?? s.avgFuelL100 ?? FLEET.avgFuelL100;
 
   // Total km driven = loaded km + empty km (deadhead)
   // Empty km increases fuel/service costs but generates no revenue
@@ -152,11 +175,13 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
   const fuelLiters = (fuelL100 / 100) * totalKm;
   const fuelCost   = fuelLiters * fuelPriceEurL;
 
-  // 2. ADBLUE — 3.5% of diesel volume × ~0.35 EUR/l (avg market)
-  const adblue = fuelLiters * FLEET.adblueRatePct * 0.35;
+  // 2. ADBLUE
+  const adblueRate = (s.adblueRatePct ?? FLEET.adblueRatePct) / 100;
+  const adblue = fuelLiters * adblueRate * 0.35;
 
-  // 3. IDLE FUEL LOSSES — 9.22% of fuel cost (from our data)
-  const idle = fuelCost * FLEET.idleFuelPct;
+  // 3. IDLE FUEL LOSSES
+  const idlePct = s.idleFuelPct ?? FLEET.idleFuelPct;
+  const idle = fuelCost * idlePct;
 
   // 4. TOLLS — use ORS real-route value if available, else matrix with EURO class adjustment
   const euro = vehicleYearProduced ? euroClass(vehicleYearProduced) : 6;
@@ -182,14 +207,12 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     tollCost = (avgToll / 100) * distanceKm;
   }
 
-  // 5. DRIVER — Model Dobowy (rekomendowany w transporcie międzynarodowym)
-  // Kierowca kosztuje tyle samo niezależnie od km — płacimy za DOBY pracy.
-  // Dobowy koszt netto = 3 821 EUR / 21 dni roboczych = 181,95 EUR/dobę
-  // Doby trasy: z dat TMS (pickup→delivery) lub ceil(km / 450 km/dobę)
+  // 5. DRIVER — Model Dobowy
   const routeDays = input.routeDays && input.routeDays > 0
     ? input.routeDays
     : Math.max(1, Math.ceil(distanceKm / FLEET.driverKmPerDay));
-  const driverCost = routeDays * FLEET.driverDailyCostNet;
+  const dailyCost = s.driverDailyCost ?? FLEET.driverDailyCostNet;
+  const driverCost = routeDays * dailyCost;
 
   // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
   // Uses totalKm (loaded + empty) — service/wear applies to all km driven
@@ -198,23 +221,25 @@ export function calculateRoute(input: RouteInput): CostBreakdown {
     ?? (isNewVehicle ? FLEET.serviceCostNewKm : FLEET.serviceCostOldKm);
   const serviceCost = serviceCostKm * totalKm;
 
-  // 7a. LEASING CIĄGNIKA — pro-rata per km
+  // 7a. LEASING CIĄGNIKA
   const leasingMo = leasingEurMo
     ?? (isNewVehicle ? FLEET.leasingNewEurMo : FLEET.leasingOldEurMo);
-  const leasingPerKm = leasingMo / FLEET.avgKmPerMonth;
-  const leasingCost  = leasingPerKm * distanceKm;
+  const leasingCost = s.leasingMethod === 'per_dobe'
+    ? (leasingMo / 30) * routeDays
+    : (leasingMo / fleetAvgKmMo) * distanceKm;
 
-  // 7b. LEASING NACZEPY — pro-rata per km
-  // Priority: (1) paired trailer from fleet, (2) fleet-avg naczep passed in,
-  //           (3) year-tier fallback constant
+  // 7b. LEASING NACZEPY
   const trailerLeasingMo = input.trailerLeasingEurMo
     ?? (isNewVehicle ? FLEET.trailerLeasingNewEurMo : FLEET.trailerLeasingOldEurMo);
-  const trailerLeasingCost = (trailerLeasingMo / FLEET.avgKmPerMonth) * distanceKm;
+  const trailerLeasingCost = s.trailerLeasingMethod === 'per_dobe'
+    ? (trailerLeasingMo / 30) * routeDays
+    : (trailerLeasingMo / fleetAvgKmMo) * distanceKm;
 
-  // 8. INSURANCE (OC+AC) — pro-rata per km from Supabase per vehicle
-  // Fleet default: avg 188 EUR/mies. (6 531 PLN OC + 3 053 PLN AC @ 4.25)
+  // 8. INSURANCE (OC+AC)
   const insuranceMo = input.insuranceEurMo ?? FLEET.insuranceEurMo;
-  const insuranceCost = (insuranceMo / FLEET.avgKmPerMonth) * distanceKm;
+  const insuranceCost = s.insuranceMethod === 'per_dobe'
+    ? (insuranceMo / 30) * routeDays
+    : (insuranceMo / fleetAvgKmMo) * distanceKm;
 
   // ─── Totals ───────────────────────────────────────────────
   const total = fuelCost + adblue + idle + tollCost + driverCost + serviceCost + leasingCost + trailerLeasingCost + insuranceCost;
@@ -254,14 +279,15 @@ function round2(n: number): number {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────
-export function profitabilityLabel(marginPct: number): {
-  label: string;
-  color: string;
-} {
-  if (marginPct >= 15) return { label: "Rentowna", color: "emerald" };
-  if (marginPct >= 5)  return { label: "Niska marża", color: "amber" };
-  if (marginPct >= 0)  return { label: "Próg rentowności", color: "orange" };
-  return { label: "STRATA", color: "red" };
+export function profitabilityLabel(
+  marginPct: number,
+  goodPct = 15,
+  lowPct  = 5,
+): { label: string; color: string } {
+  if (marginPct >= goodPct) return { label: "Rentowna",          color: "emerald" };
+  if (marginPct >= lowPct)  return { label: "Niska marża",       color: "amber"   };
+  if (marginPct >= 0)       return { label: "Próg rentowności",  color: "orange"  };
+  return                           { label: "STRATA",            color: "red"     };
 }
 
 export function countryName(iso: string): string {

@@ -4,6 +4,7 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { calculateRoute, FLEET } from "@/lib/calculator";
+import { useSettings } from "@/lib/settings-context";
 
 // ─── Types ────────────────────────────────────────────────────
 interface Dispatcher {
@@ -100,6 +101,7 @@ function parseFracht(s: string, eurRate: number): number {
 
 // ─── Main page ────────────────────────────────────────────────
 export default function DyspozytorzyPage() {
+  const { settings } = useSettings();
   const fileRef = useRef<HTMLInputElement>(null);
   const [dispatchers, setDispatchers] = useState<Dispatcher[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
@@ -283,7 +285,7 @@ export default function DyspozytorzyPage() {
       let frachtEstimated = false;
       let noFreightData = false;
       if (frachtEur === 0 && tmsMarzaPerKm > 0) {
-        const bd0 = calculateRoute({ ...calcBase, freightEur: 1 });
+        const bd0 = calculateRoute({ ...calcBase, freightEur: 1 }, settings);
         frachtEur = Math.round((bd0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
         frachtEstimated = true;
       } else if (frachtEur === 0) {
@@ -292,7 +294,7 @@ export default function DyspozytorzyPage() {
       }
 
       // Always calculate costs — even when fracht=0 we want to show the cost exposure
-      const bd = calculateRoute({ ...calcBase, freightEur: frachtEur });
+      const bd = calculateRoute({ ...calcBase, freightEur: frachtEur }, settings);
 
       const disp_id = dispMap[vehicle] ?? null;
       metrics.push({

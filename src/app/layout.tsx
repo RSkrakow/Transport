@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import Link from "next/link";
+import AppShell from "@/components/AppShell";
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -83,6 +84,12 @@ export default function RootLayout({
                 >
                   Import
                 </Link>
+                <Link
+                  href="/konfiguracja"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  ⚙️
+                </Link>
               </nav>
             </div>
           </div>
@@ -90,7 +97,7 @@ export default function RootLayout({
 
         {/* ── Main ── */}
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {children}
+          <AppShell>{children}</AppShell>
         </main>
 
         {/* ── Footer ── */}

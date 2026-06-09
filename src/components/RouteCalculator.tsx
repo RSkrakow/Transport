@@ -9,6 +9,7 @@ import {
   type CostBreakdown as CostBreakdownType,
 } from "@/lib/calculator";
 import { supabase, type Vehicle } from "@/lib/supabase";
+import { useSettings } from "@/lib/settings-context";
 import CostBreakdownPanel from "./CostBreakdown";
 import RouteFinderPanel from "./RouteFinderPanel";
 
@@ -26,6 +27,7 @@ const TRANSIT_PRESETS: Record<string, string[]> = {
 };
 
 export default function RouteCalculator() {
+  const { settings } = useSettings();
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [form, setForm] = useState({
     originCountry: "PL",
@@ -109,7 +111,7 @@ export default function RouteCalculator() {
       trailerLeasingEurMo: selectedTrailer?.leasing_eur_mo ?? fleetAvgTrailerLeasing,
       vehicleYearProduced: selectedVehicle?.year_produced ?? undefined,
     };
-    setResult(calculateRoute(input));
+    setResult(calculateRoute(input, settings));
   };
 
   const handleSave = async () => {

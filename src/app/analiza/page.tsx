@@ -4,6 +4,7 @@ import { useState, useRef } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { calculateRoute, profitabilityLabel, euroClass as deriveEuroClass, FLEET } from "@/lib/calculator";
+import { useSettings } from "@/lib/settings-context";
 
 interface OrsVerification {
   distanceKm: number;
@@ -73,6 +74,7 @@ function DiffBadge({ pct }: { pct: number }) {
 }
 
 export default function AnalizaPage() {
+  const { settings } = useSettings();
   const fileRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<RouteRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -242,7 +244,7 @@ export default function AnalizaPage() {
               trailerLeasingEurMo,
               insuranceEurMo, serviceCostKmOverride, routeDays,
               overrideTollEur: tmsTollEur || undefined,
-            });
+            }, settings);
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
             frachtEstimated = true;
           } else if (frachtEur === 0) {
@@ -258,8 +260,8 @@ export default function AnalizaPage() {
             avgFuelL100, vehicleYearProduced: vehicleYear, leasingEurMo,
             trailerLeasingEurMo,
             insuranceEurMo, serviceCostKmOverride, routeDays,
-            overrideTollEur: tmsTollEur || undefined,  // real TMS toll — overrides matrix
-          });
+            overrideTollEur: tmsTollEur || undefined,
+          }, settings);
 
           const { label, color } = noFreightData
             ? { label: "BRAK DANYCH", color: "slate" }
