@@ -43,6 +43,9 @@ export default function RouteCalculator() {
   const [overrideTollEur, setOverrideTollEur] = useState<number | undefined>(undefined);
   const [showRouteFinder, setShowRouteFinder] = useState(false);
 
+  const [trailers, setTrailers] = useState<Vehicle[]>([]);
+  const [selectedTrailerReg, setSelectedTrailerReg] = useState("");
+
   useEffect(() => {
     supabase
       .from("vehicles")
@@ -51,9 +54,22 @@ export default function RouteCalculator() {
       .eq("vehicle_type", "ciągnik")
       .order("reg")
       .then(({ data }) => setVehicles(data ?? []));
+    supabase
+      .from("vehicles")
+      .select("*")
+      .eq("is_active", true)
+      .eq("vehicle_type", "naczepa")
+      .order("reg")
+      .then(({ data }) => setTrailers(data ?? []));
   }, []);
 
   const selectedVehicle = vehicles.find(v => v.reg === form.vehicleReg);
+  const selectedTrailer = trailers.find(v => v.reg === selectedTrailerReg);
+
+  // Fleet average trailer leasing (fallback when no specific trailer chosen)
+  const fleetAvgTrailerLeasing = trailers.length
+    ? trailers.reduce((sum, t) => sum + (t.leasing_eur_mo ?? 0), 0) / trailers.length
+    : undefined;
 
   const getTransitCountries = (): string[] => {
     if (form.customTransit.trim()) {
@@ -90,6 +106,7 @@ export default function RouteCalculator() {
       transitCountries: getTransitCountries(),
       overrideTollEur,
       leasingEurMo: selectedVehicle?.leasing_eur_mo ?? undefined,
+      trailerLeasingEurMo: selectedTrailer?.leasing_eur_mo ?? fleetAvgTrailerLeasing,
       vehicleYearProduced: selectedVehicle?.year_produced ?? undefined,
     };
     setResult(calculateRoute(input));
@@ -247,6 +264,33 @@ export default function RouteCalculator() {
             <p className="text-xs text-slate-400 mt-1">
               Spalanie: {selectedVehicle.avg_fuel_l100 ?? FLEET.avgFuelL100} l/100km
               · Leasing: {selectedVehicle.leasing_eur_mo ?? "—"} EUR/mies.
+            </p>
+          )}
+        </div>
+
+        {/* Trailer */}
+        <div>
+          <label className="label">Naczepa (opcjonalnie)</label>
+          <select
+            className="input-field"
+            value={selectedTrailerReg}
+            onChange={e => setSelectedTrailerReg(e.target.value)}
+          >
+            <option value="">— Średnia floty naczep —</option>
+            {trailers.map(v => (
+              <option key={v.reg} value={v.reg}>
+                {v.reg}{v.year_produced ? ` · ${v.year_produced}` : ""}
+                {v.leasing_eur_mo ? ` · ${v.leasing_eur_mo} EUR/mies.` : ""}
+              </option>
+            ))}
+          </select>
+          {selectedTrailer ? (
+            <p className="text-xs text-slate-400 mt-1">
+              Leasing: {selectedTrailer.leasing_eur_mo ?? "—"} EUR/mies.
+            </p>
+          ) : (
+            <p className="text-xs text-slate-400 mt-1">
+              Śr. floty: {fleetAvgTrailerLeasing ? `${fleetAvgTrailerLeasing.toFixed(0)} EUR/mies.` : "brak danych"}
             </p>
           )}
         </div>

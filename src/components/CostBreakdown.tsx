@@ -21,7 +21,9 @@ const COLORS = [
   "#f59e0b", // toll
   "#10b981", // driver
   "#ef4444", // service
-  "#6366f1", // leasing
+  "#6366f1", // leasing ciągnik
+  "#818cf8", // leasing naczepa
+  "#f43f5e", // insurance
 ];
 
 const fmt = (n: number) =>
@@ -35,13 +37,15 @@ export default function CostBreakdown({
   const { label, color } = profitabilityLabel(result.marginPct);
 
   const costItems = [
-    { name: "Paliwo ON",    value: result.fuel,    icon: "⛽" },
-    { name: "AdBlue",       value: result.adblue,  icon: "💧" },
-    { name: "Bieg jałowy",  value: result.idle,    icon: "🔄" },
-    { name: "Autostrady",   value: result.toll,    icon: "🛣️" },
-    { name: "Kierowca",     value: result.driver,  icon: "👤" },
-    { name: "Serwis",       value: result.service, icon: "🔧" },
-    { name: "Leasing",      value: result.leasing, icon: "📋" },
+    { name: "Paliwo ON",      value: result.fuel,           icon: "⛽" },
+    { name: "AdBlue",         value: result.adblue,         icon: "💧" },
+    { name: "Bieg jałowy",    value: result.idle,           icon: "🔄" },
+    { name: "Autostrady",     value: result.toll,           icon: "🛣️" },
+    { name: "Kierowca",       value: result.driver,         icon: "👤" },
+    { name: "Serwis",         value: result.service,        icon: "🔧" },
+    { name: "Leasing cią.",   value: result.leasing,        icon: "💳" },
+    { name: "Leasing nacz.",  value: result.trailerLeasing, icon: "🚛" },
+    { name: "Ubezpieczenie",  value: result.insurance,      icon: "🛡️" },
   ];
 
   const pieData = costItems.map(i => ({ name: i.name, value: i.value }));
