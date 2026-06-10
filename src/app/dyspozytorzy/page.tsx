@@ -507,7 +507,19 @@ export default function DyspozytorzyPage() {
         });
       }
 
-      const activeDays = sorted.reduce((s, r) => s + (r.routeDays || 1), 0);
+      // Unikalne dni kalendarzowe pokryte trasami (unika sumowania dla tras-overlap)
+      const activeDaySet = new Set<string>();
+      for (const r of sorted) {
+        if (!r.tripDate) continue;
+        const start = new Date(r.tripDate);
+        const days  = r.routeDays || 1;
+        for (let d = 0; d < days; d++) {
+          const dt = new Date(start);
+          dt.setUTCDate(dt.getUTCDate() + d);
+          activeDaySet.add(dt.toISOString().slice(0, 10));
+        }
+      }
+      const activeDays = activeDaySet.size;
       const idleDays   = gaps.reduce((s, g) => s + g.idleDays, 0);
       const idleCost   = gaps.reduce((s, g) => s + g.idleCostEur, 0);
       const totalFreight = sorted.reduce((s, r) => s + r.frachtEur, 0);
@@ -1084,7 +1096,7 @@ export default function DyspozytorzyPage() {
                                     <div key={r.orderNr} className="flex items-stretch">
                                       {/* Route block */}
                                       <div
-                                        title={`${r.orderNr} | ${r.originCountry}→${r.destCountry} | ${r.routeDays}d | ${r.marginEur >= 0 ? "+" : ""}${Math.round(r.marginEur)}€`}
+                                        title={`${r.orderNr} | ${r.originCountry}→${r.destCountry} | ${r.routeDays}d | ${r.tripDate}→${r.deliveryDate} | ${r.marginEur >= 0 ? "+" : ""}${Math.round(r.marginEur)}€`}
                                         className={`${rColor} text-white flex flex-col justify-center items-center px-2 py-2 rounded-lg`}
                                         style={{ minWidth: routeWidth }}>
                                         <span className="font-semibold truncate max-w-full">{r.originCountry}→{r.destCountry}</span>
