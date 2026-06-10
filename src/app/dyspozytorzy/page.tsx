@@ -35,6 +35,30 @@ interface CostBreakdownDetail {
   leasing: number; trailerLeasing: number; insurance: number;
 }
 
+// ─── Monthly analysis types ───────────────────────────────────
+interface RouteGap {
+  prevRoute: RouteMetric;
+  nextRoute: RouteMetric;
+  idleDays: number;     // calendar days between delivery[n] and pickup[n+1]
+  idleCostEur: number;  // idleDays × dailyFixedRate
+}
+
+interface MonthlyVehicleSummary {
+  vehicle: string;
+  month: string;        // "2026-05"
+  routes: RouteMetric[];
+  gaps: RouteGap[];
+  activeDays: number;   // Σ routeDays
+  idleDays: number;     // Σ gap.idleDays
+  idleCostEur: number;  // Σ gap.idleCostEur
+  totalFreight: number;
+  totalRouteCosts: number;   // includes fixed costs for active days
+  trueMonthlyMargin: number; // totalFreight - totalRouteCosts - idleCostEur
+  trueMarginPct: number;
+  routeMarginSum: number;    // Σ route.marginEur (without idle correction)
+  drivers: string[];         // unique driver names in this month
+}
+
 interface RouteMetric {
   orderNr: string;
   client: string;
@@ -60,7 +84,9 @@ interface RouteMetric {
   // Kontynuacja trasy — ten sam ciągnik, ten sam dzień
   isContinuation: boolean;
   perDobeShareFactor: number;
-  tripDate: string;
+  tripDate: string;       // YYYY-MM-DD załadunek
+  deliveryDate: string;   // YYYY-MM-DD dostarczenie (rzeczywiste > planowane)
+  driverName: string;     // z kolumny "Kierowca 1"
 }
 
 interface DispatcherKPI {
@@ -105,14 +131,25 @@ function parseFracht(s: string, eurRate: number): number {
 
 function toDateKey(s: string): string {
   if (!s) return "";
+  // Excel serial number
   const n = parseFloat(s);
   if (!isNaN(n) && n > 40000) {
     const d = new Date((n - 25569) * 86400 * 1000);
     return d.toISOString().slice(0, 10);
   }
+  // TMS format: "DD-MM-YYYY HH:MM" or "DD-MM-YYYY"
+  const dmy = s.match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  // ISO or other JS-parseable
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
   return s.length >= 10 ? s.slice(0, 10) : "";
+}
+
+/** Difference in whole calendar days between two YYYY-MM-DD strings */
+function daysBetween(a: string, b: string): number {
+  if (!a || !b) return 0;
+  return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000);
 }
 
 // ─── Main page ────────────────────────────────────────────────
@@ -122,9 +159,10 @@ export default function DyspozytorzyPage() {
   const [dispatchers, setDispatchers] = useState<Dispatcher[]>([]);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [kpiData, setKpiData] = useState<DispatcherKPI[]>([]);
+  const [monthlyData, setMonthlyData] = useState<MonthlyVehicleSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"config" | "dashboard" | "routes">("dashboard");
+  const [activeTab, setActiveTab] = useState<"config" | "dashboard" | "routes" | "monthly">("dashboard");
   const [selectedDispatcher, setSelectedDispatcher] = useState<string | null>(null);
   const [weekLabel, setWeekLabel] = useState("");
   const [eurRate, setEurRate] = useState(4.27);
@@ -283,21 +321,21 @@ export default function DyspozytorzyPage() {
       const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
       const tmsMarzaPerKm = isNaN(tmsMarzaPerKmRaw) ? 0 : tmsMarzaPerKmRaw;
 
-      // Route days from TMS dates
-      const parseExcelDate = (s: string) => {
-        const n = parseFloat(s);
-        if (!isNaN(n) && n > 40000) return new Date((n - 25569) * 86400 * 1000);
-        return new Date(s);
-      };
-      const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku");
-      const deliveryRaw = get(row, "dostarczenie", "data rozładunku");
+      // Route dates — prefer "rzeczywiste" (actual) over planned
+      // TMS columns: "Podjęcie rzeczywiste" / "Podjęcie" for pickup
+      //              "Dostarczenie rzeczywiste" / "Dostarczenie" for delivery
+      const pickupRaw   = get(row, "podjęcie rzeczywiste", "podjecie rzeczywiste", "podjęcie", "podjecie", "data załadunku");
+      const deliveryRaw = get(row, "dostarczenie rzeczywiste", "dostarczenie", "data rozładunku", "data dostarczenia");
       const tripDate    = toDateKey(pickupRaw);
+      const deliveryDate = toDateKey(deliveryRaw);
+
+      // Driver name from TMS
+      const driverName = get(row, "kierowca 1", "kierowca1", "kierowca", "driver").trim();
+
+      // Route duration in days
       let routeDays: number | undefined;
-      if (pickupRaw && deliveryRaw) {
-        const d1 = parseExcelDate(pickupRaw), d2 = parseExcelDate(deliveryRaw);
-        if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
-          routeDays = Math.max(1, Math.round((d2.getTime()-d1.getTime())/86400000) + 1);
-        }
+      if (tripDate && deliveryDate && deliveryDate >= tripDate) {
+        routeDays = Math.max(1, daysBetween(tripDate, deliveryDate) + 1);
       }
 
       // Kontynuacja — ten sam ciągnik, ten sam dzień
@@ -363,6 +401,7 @@ export default function DyspozytorzyPage() {
         costPerKm: bd.costPerKm,
         revenuePerKm: bd.revenuePerKm,
         isContinuation, perDobeShareFactor, tripDate,
+        deliveryDate, driverName,
       });
     }
 
@@ -421,6 +460,79 @@ export default function DyspozytorzyPage() {
     }
 
     kpis.sort((a,b) => b.marginEur - a.marginEur);
+
+    // ─── Monthly vehicle analysis ─────────────────────────────
+    // Group all metrics by vehicle + month (by pickup date)
+    const mvMap = new Map<string, RouteMetric[]>();
+    for (const m of metrics) {
+      if (!m.tripDate) continue;
+      const mo = m.tripDate.slice(0, 7); // "YYYY-MM"
+      const k  = `${m.vehicle}|${mo}`;
+      if (!mvMap.has(k)) mvMap.set(k, []);
+      mvMap.get(k)!.push(m);
+    }
+
+    const monthlySummaries: MonthlyVehicleSummary[] = [];
+    for (const [key, routes] of mvMap.entries()) {
+      const [vehicle, month] = key.split("|");
+      // Sort routes by pickup date
+      const sorted = [...routes].sort((a, b) => a.tripDate.localeCompare(b.tripDate));
+
+      // Compute gaps between consecutive routes
+      const gaps: RouteGap[] = [];
+      for (let i = 0; i < sorted.length - 1; i++) {
+        const prev = sorted[i];
+        const next = sorted[i + 1];
+        if (!prev.deliveryDate || !next.tripDate) continue;
+        const gap = daysBetween(prev.deliveryDate, next.tripDate);
+        if (gap <= 0) continue; // overlapping or same-day: no idle
+
+        // Daily fixed-cost rate: driver + leasing/30 + trailerLeasing/30 + insurance/30
+        // Use the breakdown of any route for per-day rates (avg if multiple)
+        const bd = prev.breakdown;
+        // Estimate daily fixed cost: driver and per-dobe components
+        // Driver cost / routeDays gives daily driver rate
+        const driverDailyRate = settings.driverDailyCost ?? 181.95;
+        // For leasing/insurance: use per-route cost / routeDays if >0
+        const days = prev.routeDays || 1;
+        const leasingDailyRate = (bd.leasing + bd.trailerLeasing) / days;
+        const insuranceDailyRate = bd.insurance / days;
+        const dailyFixed = driverDailyRate + leasingDailyRate + insuranceDailyRate;
+
+        gaps.push({
+          prevRoute: prev,
+          nextRoute: next,
+          idleDays: gap,
+          idleCostEur: Math.round(gap * dailyFixed * 100) / 100,
+        });
+      }
+
+      const activeDays = sorted.reduce((s, r) => s + (r.routeDays || 1), 0);
+      const idleDays   = gaps.reduce((s, g) => s + g.idleDays, 0);
+      const idleCost   = gaps.reduce((s, g) => s + g.idleCostEur, 0);
+      const totalFreight = sorted.reduce((s, r) => s + r.frachtEur, 0);
+      const totalRouteCosts = sorted.reduce((s, r) => s + r.totalCost, 0);
+      const routeMarginSum = sorted.reduce((s, r) => s + r.marginEur, 0);
+      const trueMargin = routeMarginSum - idleCost;
+      const trueMarginPct = totalFreight > 0 ? (trueMargin / totalFreight) * 100 : 0;
+      const drivers = [...new Set(sorted.map(r => r.driverName).filter(Boolean))];
+
+      monthlySummaries.push({
+        vehicle, month, routes: sorted, gaps,
+        activeDays, idleDays, idleCostEur: Math.round(idleCost),
+        totalFreight, totalRouteCosts,
+        trueMonthlyMargin: Math.round(trueMargin),
+        trueMarginPct,
+        routeMarginSum: Math.round(routeMarginSum),
+        drivers,
+      });
+    }
+    // Sort: month desc, then by idle cost desc (biggest problem first)
+    monthlySummaries.sort((a, b) =>
+      b.month.localeCompare(a.month) || b.idleCostEur - a.idleCostEur
+    );
+    setMonthlyData(monthlySummaries);
+
     setKpiData(kpis);
     setActiveTab("dashboard");
     setAnalysisLoading(false);
@@ -555,7 +667,7 @@ export default function DyspozytorzyPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200">
-        {([["dashboard","📊 Dashboard"], ["routes","📋 Trasy"], ["config","⚙ Konfiguracja"]] as [string,string][]).map(([t,l]) => (
+        {([["dashboard","📊 Dashboard"], ["routes","📋 Trasy"], ["monthly","📅 Bilans miesięczny"], ["config","⚙ Konfiguracja"]] as [string,string][]).map(([t,l]) => (
           <button key={t} onClick={()=>setActiveTab(t as any)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
               activeTab===t ? "border-blue-600 text-blue-600 bg-blue-50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
@@ -889,6 +1001,152 @@ export default function DyspozytorzyPage() {
             </table>
           )}
         </div>
+        </div>
+      )}
+
+      {/* ── Bilans miesięczny ── */}
+      {activeTab === "monthly" && (
+        <div className="space-y-4">
+          {monthlyData.length === 0 ? (
+            <div className="text-center py-16 text-slate-400">
+              <div className="text-4xl mb-3">📅</div>
+              <p className="text-sm">Wczytaj plik XLS z kolumnami <b>Dostarczenie</b> i <b>Kierowca 1</b> aby zobaczyć bilans miesięczny</p>
+            </div>
+          ) : (
+            <>
+              {/* Summary banner */}
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                <b>Bilans miesięczny</b> pokazuje realne koszty pojazdów — łącznie z dniami postoju między zleceniami.
+                Marża tras to wynik widoczny w tabeli Trasy. <b>Realna marża</b> odejmuje koszty dni bez zleceń (kierowca + leasing + ubezpieczenie).
+              </div>
+
+              {/* Month selector */}
+              {(() => {
+                const months = [...new Set(monthlyData.map(s => s.month))].sort().reverse();
+                return months.map(mo => {
+                  const monthSummaries = monthlyData.filter(s => s.month === mo);
+                  const moLabel = new Date(mo + "-01").toLocaleString("pl-PL", { month: "long", year: "numeric" });
+                  const totalIdle = monthSummaries.reduce((s,x)=>s+x.idleCostEur, 0);
+                  const totalFr   = monthSummaries.reduce((s,x)=>s+x.totalFreight, 0);
+                  const totalTrue = monthSummaries.reduce((s,x)=>s+x.trueMonthlyMargin, 0);
+
+                  return (
+                    <div key={mo} className="space-y-3">
+                      {/* Month header */}
+                      <div className="flex items-center justify-between bg-slate-800 text-white px-5 py-3 rounded-xl">
+                        <span className="font-semibold capitalize">{moLabel}</span>
+                        <div className="flex gap-6 text-sm">
+                          <span>Postoje: <b className="text-amber-300">{fmtEur(totalIdle)}</b></span>
+                          <span>Fracht: <b>{fmtEur(totalFr)}</b></span>
+                          <span>Realna marża: <b className={totalTrue >= 0 ? "text-emerald-300" : "text-red-300"}>{fmtEur(totalTrue)}</b></span>
+                        </div>
+                      </div>
+
+                      {/* Per-vehicle cards */}
+                      {monthSummaries.map(s => {
+                        const totalDays = s.activeDays + s.idleDays;
+                        const utilizationPct = totalDays > 0 ? Math.round((s.activeDays / totalDays) * 100) : 0;
+                        const trueMarginColor = s.trueMonthlyMargin >= 0
+                          ? (s.trueMonthlyMargin / (s.totalFreight||1) * 100 >= 10 ? "text-emerald-600" : "text-amber-600")
+                          : "text-red-600";
+
+                        return (
+                          <div key={s.vehicle} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                            {/* Card header */}
+                            <div className="flex items-center justify-between px-5 py-3 bg-slate-50 border-b border-slate-200">
+                              <div className="flex items-center gap-3">
+                                <span className="font-bold text-slate-800 text-sm">{s.vehicle}</span>
+                                {s.drivers.length > 0 && (
+                                  <div className="flex gap-1 flex-wrap">
+                                    {s.drivers.map(d => (
+                                      <span key={d} className="px-2 py-0.5 bg-blue-100 text-blue-700 rounded-full text-xs font-medium">{d}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-4 text-xs text-slate-500">
+                                <span>{s.routes.length} {s.routes.length === 1 ? "trasa" : "trasy"}</span>
+                                <span className={`font-semibold ${utilizationPct >= 70 ? "text-emerald-600" : utilizationPct >= 40 ? "text-amber-600" : "text-red-600"}`}>
+                                  Utylizacja: {utilizationPct}%
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Timeline */}
+                            <div className="px-5 py-3 overflow-x-auto">
+                              <div className="flex items-stretch gap-0 min-w-max text-xs">
+                                {s.routes.map((r, i) => {
+                                  const gap = s.gaps.find(g => g.prevRoute === r);
+                                  const routeWidth = Math.max(60, (r.routeDays || 1) * 28);
+                                  const gapWidth = gap ? Math.max(24, gap.idleDays * 20) : 0;
+                                  const rColor = r.marginPct >= 15 ? "bg-emerald-500" : r.marginPct >= 5 ? "bg-amber-400" : r.marginPct >= 0 ? "bg-orange-400" : "bg-red-500";
+                                  return (
+                                    <div key={r.orderNr} className="flex items-stretch">
+                                      {/* Route block */}
+                                      <div
+                                        title={`${r.orderNr} | ${r.originCountry}→${r.destCountry} | ${r.routeDays}d | ${r.marginEur >= 0 ? "+" : ""}${Math.round(r.marginEur)}€`}
+                                        className={`${rColor} text-white flex flex-col justify-center items-center px-2 py-2 rounded-lg`}
+                                        style={{ minWidth: routeWidth }}>
+                                        <span className="font-semibold truncate max-w-full">{r.originCountry}→{r.destCountry}</span>
+                                        <span className="opacity-80">{r.routeDays}d</span>
+                                        <span className="opacity-90 font-medium">{r.marginEur >= 0 ? "+" : ""}{Math.round(r.marginEur)}€</span>
+                                      </div>
+                                      {/* Gap block */}
+                                      {gap && (
+                                        <div
+                                          title={`Postój: ${gap.idleDays} dni × stawka dzienna = ${Math.round(gap.idleCostEur)} EUR`}
+                                          className="flex flex-col justify-center items-center bg-slate-100 border-y border-dashed border-slate-300 text-slate-500 px-2"
+                                          style={{ minWidth: gapWidth }}>
+                                          <span className="font-semibold text-red-500">{gap.idleDays}d</span>
+                                          <span className="text-red-400">−{Math.round(gap.idleCostEur)}€</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              {/* Legend */}
+                              <div className="flex gap-3 mt-2 text-xs text-slate-400">
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500 inline-block"/>Rentowna</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-400 inline-block"/>Niska marża</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500 inline-block"/>Strata</span>
+                                <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-slate-200 border border-dashed border-slate-400 inline-block"/>Postój (koszt)</span>
+                              </div>
+                            </div>
+
+                            {/* KPI row */}
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-0 border-t border-slate-200 divide-x divide-slate-200">
+                              <div className="px-4 py-3 text-center">
+                                <div className="text-xs text-slate-400 mb-0.5">Aktywne</div>
+                                <div className="font-bold text-slate-700">{s.activeDays} dni</div>
+                              </div>
+                              <div className="px-4 py-3 text-center">
+                                <div className="text-xs text-slate-400 mb-0.5">Postoje</div>
+                                <div className="font-bold text-red-500">{s.idleDays} dni · {fmtEur(s.idleCostEur)}</div>
+                              </div>
+                              <div className="px-4 py-3 text-center">
+                                <div className="text-xs text-slate-400 mb-0.5">Marża tras</div>
+                                <div className={`font-bold ${s.routeMarginSum >= 0 ? "text-slate-700" : "text-red-500"}`}>
+                                  {s.routeMarginSum >= 0 ? "+" : ""}{fmtEur(s.routeMarginSum)}
+                                </div>
+                              </div>
+                              <div className="px-4 py-3 text-center">
+                                <div className="text-xs text-slate-400 mb-0.5">Realna marża</div>
+                                <div className={`font-bold ${trueMarginColor}`}>
+                                  {s.trueMonthlyMargin >= 0 ? "+" : ""}{fmtEur(s.trueMonthlyMargin)}
+                                  <span className="text-xs font-normal ml-1">({fmtPct(s.trueMarginPct)})</span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                });
+              })()}
+            </>
+          )}
         </div>
       )}
 
