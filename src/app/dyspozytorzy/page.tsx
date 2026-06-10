@@ -329,8 +329,13 @@ export default function DyspozytorzyPage() {
       const vData = vehMap[vehicle];
 
       // Real toll: prefer EUR column, fallback to PLN→EUR (unified with analiza)
-      const tmsTollEurRaw = parseFloat(get(row, "myto na trasie eur") || "0");
-      const tmsTollPlnRaw = parseFloat(get(row, "myto na trasie pln") || "0");
+      const tmsTollEurRaw = parseFloat(get(row,
+        "myto na trasie eur", "myto eur", "maut eur", "toll eur", "opłata drogowa eur"
+      ) || "0");
+      const tmsTollPlnRaw = parseFloat(get(row,
+        "myto na trasie pln", "myto pln", "maut pln", "toll pln",
+        "opłata drogowa pln", "opłata drogowa"
+      ) || "0");
       const tmsTollEur = tmsTollEurRaw > 0
         ? tmsTollEurRaw
         : tmsTollPlnRaw > 0 ? Math.round((tmsTollPlnRaw / eurRate) * 100) / 100 : 0;

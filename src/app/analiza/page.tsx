@@ -279,9 +279,14 @@ export default function AnalizaPage() {
           const tmsMarzaPerKm = isNaN(tmsMarzaPerKmRaw) ? 0 : tmsMarzaPerKmRaw;
 
           // Real toll from TMS (DKV/viaTOLL actual invoices)
-          // Column "Myto na trasie EUR" preferred, fallback to PLN→EUR conversion
-          const tmsTollEurRaw  = parseFloat(get(row, "myto na trasie eur") || "0");
-          const tmsTollPlnRaw  = parseFloat(get(row, "myto na trasie pln") || "0");
+          // Szukamy po różnych możliwych nazwach kolumn eksportu TMS
+          const tmsTollEurRaw = parseFloat(get(row,
+            "myto na trasie eur", "myto eur", "maut eur", "toll eur", "opłata drogowa eur"
+          ) || "0");
+          const tmsTollPlnRaw = parseFloat(get(row,
+            "myto na trasie pln", "myto pln", "maut pln", "toll pln",
+            "opłata drogowa pln", "opłata drogowa"
+          ) || "0");
           const tmsTollEur = tmsTollEurRaw > 0
             ? tmsTollEurRaw
             : tmsTollPlnRaw > 0
@@ -784,7 +789,7 @@ export default function AnalizaPage() {
                     <td className="px-3 py-2.5 text-right text-slate-600"
                       title={r.tollFromTms
                         ? `Myto z TMS (DKV/viaTOLL): ${r.tollCost.toFixed(2)} EUR`
-                        : `Myto z macierzy HBM · EURO ${r.euroClass} · ${r.originCountry}→${r.destCountry}`}>
+                        : `Brak kolumny myta w pliku — szacowane z macierzy HBM (EURO ${r.euroClass}, ${r.originCountry}→${r.destCountry}). Dodaj "Myto na trasie EUR" lub "Myto na trasie PLN" w eksporcie TMS.`}>
                       {r.tollCost.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
                       <div className={`text-xs font-medium ${r.tollFromTms ? "text-emerald-600" : "text-slate-400"}`}>
                         {r.tollFromTms ? "✓ TMS" : `≈ macierz`}
