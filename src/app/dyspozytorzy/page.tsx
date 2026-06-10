@@ -282,7 +282,8 @@ export default function DyspozytorzyPage() {
       const dKm = dKmLadOdo > 0 ? dKmLadOdo : dKmMapLad;
       if (dKm < 10) continue;
       const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
-      const pickupR = get(row, "podjęcie", "podjecie", "data załadunku");
+      // Pre-pass: używaj actual pickup date (tak samo jak main-loop) żeby perDobeShareFactor zgadzał się
+      const pickupR = get(row, "podjęcie rzeczywiste", "podjecie rzeczywiste", "podjęcie", "podjecie", "data załadunku");
       const tDate = toDateKey(pickupR);
       if (veh && tDate) {
         const k = `${veh}|${tDate}`;

@@ -52,15 +52,19 @@ interface RouteRow {
 // Normalizuje datę z TMS (serial Excel lub string) do YYYY-MM-DD dla grupowania
 function toDateKey(s: string): string {
   if (!s) return "";
+  // Excel serial number
   const n = parseFloat(s);
   if (!isNaN(n) && n > 40000) {
-    // Excel serial: dni od 1900-01-01
     const d = new Date((n - 25569) * 86400 * 1000);
     return d.toISOString().slice(0, 10);
   }
+  // TMS format: "DD-MM-YYYY HH:MM" or "DD-MM-YYYY"
+  const dmy = s.match(/^(\d{2})-(\d{2})-(\d{4})/);
+  if (dmy) return `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+  // ISO or other JS-parseable
   const d = new Date(s);
   if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
-  // fallback: pierwsze 10 znaków (np. "2026-05-12 08:00")
+  // fallback: pierwsze 10 znaków
   return s.length >= 10 ? s.slice(0, 10) : "";
 }
 
@@ -197,7 +201,8 @@ export default function AnalizaPage() {
         const dKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
         if (dKm < 10) continue;
         const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
-        const pickupR = get(row, "podjęcie", "podjecie", "data załadunku", "załadunek");
+        // Pre-pass: używaj actual pickup date (tak samo jak main-loop) żeby perDobeShareFactor zgadzał się
+        const pickupR = get(row, "podjęcie rzeczywiste", "podjecie rzeczywiste", "podjęcie", "podjecie", "data załadunku", "załadunek");
         const tDate = toDateKey(pickupR);
         if (veh && tDate) {
           const k = `${veh}|${tDate}`;
@@ -220,6 +225,13 @@ export default function AnalizaPage() {
           const frachtRaw = get(row, "fracht z wal", "fracht");
           const { amount: frachtAmount, currency } = parseFracht(frachtRaw);
           let frachtEur = currency === "PLN" ? frachtAmount / eurRate : frachtAmount;
+          // Niektóre trasy mają "Stawka końcowa Xeuro" w Wymaganiach — override frachtu
+          const wymagania = get(row, "wymagania");
+          const stawkaMatch = wymagania.match(/stawka\s+ko[ńn]cowa\s+([\d\s,.]+)\s*[€eE]/i);
+          if (stawkaMatch) {
+            const finalRate = parseFloat(stawkaMatch[1].replace(/[\s]/g, "").replace(",", "."));
+            if (!isNaN(finalRate) && finalRate > frachtEur) frachtEur = finalRate;
+          }
 
           const vehicle       = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
           const naczepaReg    = get(row, "naczepa", "naczepa:", "naczepa ").toUpperCase();
@@ -238,10 +250,11 @@ export default function AnalizaPage() {
             ? trailerLeasingMap[naczepaReg]
             : fleetAvgTrailerLeasing;
 
-          // Route days from TMS dates (pickup → delivery)
-          // Columns: "Podjęcie" (load date) and "Dostarczenie" (delivery date)
-          const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku", "załadunek");
-          const deliveryRaw = get(row, "dostarczenie", "data rozładunku", "rozładunek");
+          // Route days from TMS dates — prefer "rzeczywiste" (actual) over planned
+          // Columns: "Podjęcie rzeczywiste" / "Podjęcie" for pickup
+          //          "Dostarczenie rzeczywiste" / "Dostarczenie" for delivery
+          const pickupRaw   = get(row, "podjęcie rzeczywiste", "podjecie rzeczywiste", "podjęcie", "podjecie", "data załadunku", "załadunek");
+          const deliveryRaw = get(row, "dostarczenie rzeczywiste", "dostarczenie rzeczyw", "dostarczenie", "data rozładunku", "rozładunek");
           const tripDate    = toDateKey(pickupRaw);
           let routeDays: number | undefined;
           if (pickupRaw && deliveryRaw) {
@@ -438,6 +451,7 @@ export default function AnalizaPage() {
 
   const estimatedCount  = rows.filter(r => r.frachtEstimated).length;
   const noFreightCount  = rows.filter(r => r.noFreightData).length;
+  // displayRows — tylko do wyświetlania tabeli (toggle ukryj szacowane)
   const displayRows     = hideEstimated ? rows.filter(r => !r.frachtEstimated) : rows;
 
   const sorted = [...displayRows].sort((a, b) => {
@@ -447,17 +461,20 @@ export default function AnalizaPage() {
     return String(av).localeCompare(String(bv));
   });
 
-  const profitable  = displayRows.filter(r => r.marginPct >= 15  && !r.noFreightData).length;
-  const lowMargin   = displayRows.filter(r => r.marginPct >= 5   && r.marginPct < 15 && !r.noFreightData).length;
-  const breakeven   = displayRows.filter(r => r.marginPct >= 0   && r.marginPct < 5  && !r.noFreightData).length;
-  const losses      = displayRows.filter(r => r.marginPct < 0    && !r.noFreightData).length;
-  const totalFreight = displayRows.reduce((s, r) => s + r.frachtEur, 0);
-  const totalCosts   = displayRows.reduce((s, r) => s + r.totalCost, 0);
+  // KPI totals ZAWSZE na podstawie WSZYSTKICH tras (rows) — spójnie z Dyspozytorzy
+  // displayRows służy tylko do filtrowania tabeli, nie wpływa na sumy
+  const allRows = rows;
+  const profitable  = allRows.filter(r => r.marginPct >= 15  && !r.noFreightData).length;
+  const lowMargin   = allRows.filter(r => r.marginPct >= 5   && r.marginPct < 15 && !r.noFreightData).length;
+  const breakeven   = allRows.filter(r => r.marginPct >= 0   && r.marginPct < 5  && !r.noFreightData).length;
+  const losses      = allRows.filter(r => r.marginPct < 0    && !r.noFreightData).length;
+  const totalFreight = allRows.reduce((s, r) => s + r.frachtEur, 0);
+  const totalCosts   = allRows.reduce((s, r) => s + r.totalCost, 0);
   const totalMargin  = totalFreight - totalCosts;
-  const avgMargin    = displayRows.length > 0
-    ? Math.round(displayRows.reduce((s, r) => s + r.marginPct, 0) / displayRows.length * 10) / 10 : 0;
+  const avgMargin    = allRows.length > 0
+    ? Math.round(allRows.reduce((s, r) => s + r.marginPct, 0) / allRows.length * 10) / 10 : 0;
 
-  // ORS stats
+  // ORS stats (tylko zweryfikowane trasy)
   const verified       = displayRows.filter(r => r.ors && r.ors.status !== "error");
   const alertCount     = verified.filter(r => r.ors!.status === "alert").length;
   const warnCount      = verified.filter(r => r.ors!.status === "warn").length;
