@@ -335,7 +335,11 @@ export default function DyspozytorzyPage() {
       // Route duration in days
       let routeDays: number | undefined;
       if (tripDate && deliveryDate && deliveryDate >= tripDate) {
-        routeDays = Math.max(1, daysBetween(tripDate, deliveryDate) + 1);
+        const rawDays = Math.max(1, daysBetween(tripDate, deliveryDate) + 1);
+        // Sanity check: max możliwy czas to km / min prędkość 150 km/d (postojowe, promy)
+        // Jeśli data dostarczenia jest nierealna → fallback do km-based
+        const maxReasonableDays = Math.max(2, Math.ceil((distanceKm || 500) / 150));
+        routeDays = rawDays <= maxReasonableDays ? rawDays : undefined;
       }
 
       // Kontynuacja — ten sam ciągnik, ten sam dzień

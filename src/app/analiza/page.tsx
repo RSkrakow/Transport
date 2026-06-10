@@ -258,7 +258,11 @@ export default function AnalizaPage() {
             const d2 = parseDate(deliveryRaw);
             if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
               const diff = Math.round((d2.getTime() - d1.getTime()) / 86400000);
-              routeDays = Math.max(1, diff + 1); // inclusive days
+              const rawDays = Math.max(1, diff + 1); // inclusive days
+              // Sanity: jeśli data dostarczenia nierealna (błędna kolumna) → fallback do km-based
+              const distKm = parseFloat(get(row, "km", "kilometry", "odległość", "distance")) || 500;
+              const maxReasonableDays = Math.max(2, Math.ceil(distKm / 150));
+              routeDays = rawDays <= maxReasonableDays ? rawDays : undefined;
             }
           }
 
