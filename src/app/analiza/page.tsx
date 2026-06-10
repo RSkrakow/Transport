@@ -198,7 +198,9 @@ export default function AnalizaPage() {
       for (const row of dataRows) {
         const oNr = get(row, "Nr pełny", "Nr pe", "Nr ");
         if (!oNr) continue;
-        const dKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+        const dKmOdo = parseFloat(get(row, "lad. wg licznika") || "0");
+        const dKmMap = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+        const dKm = dKmOdo > 0 ? dKmOdo : dKmMap;
         if (dKm < 10) continue;
         const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
         // Pre-pass: używaj actual pickup date (tak samo jak main-loop) żeby perDobeShareFactor zgadzał się
@@ -215,11 +217,20 @@ export default function AnalizaPage() {
           const orderNr = get(row, "Nr pełny", "Nr pe", "Nr ");
           if (!orderNr) return null;
 
-          const distanceKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+          // Preferuj km wg licznika (odometr) — rzeczywiste km; fallback km wg mapy
+          // Spójnie z dyspozytorzy/page.tsx (Task #16 + #22)
+          const kmLadOdo  = parseFloat(get(row, "lad. wg licznika") || "0");
+          const kmLadMapa = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+          const distanceKm = kmLadOdo > 0 ? kmLadOdo : kmLadMapa;
           if (distanceKm < 10) return null;
 
           // Empty/deadhead km — added to cost base (fuel + service) but not revenue
-          const emptyKmRaw = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
+          // Preferuj odometr (gdy licznikowe ładowne), fallback mapowe puste
+          const kmPusteOdo  = parseFloat(get(row, "puste wg licznika") || "0");
+          const kmPusteMapa = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
+          const emptyKmRaw = kmLadOdo > 0
+            ? (kmPusteOdo > 0 ? kmPusteOdo : kmPusteMapa)
+            : kmPusteMapa;
           const emptyKm = emptyKmRaw > 0 ? emptyKmRaw : undefined;
 
           const frachtRaw = get(row, "fracht z wal", "fracht");
@@ -273,8 +284,7 @@ export default function AnalizaPage() {
               const diff = Math.round((d2.getTime() - d1.getTime()) / 86400000);
               const rawDays = Math.max(1, diff + 1); // inclusive days
               // Sanity: jeśli data dostarczenia nierealna (błędna kolumna) → fallback do km-based
-              const distKm = parseFloat(get(row, "km", "kilometry", "odległość", "distance")) || 500;
-              const maxReasonableDays = Math.max(2, Math.ceil(distKm / 150));
+              const maxReasonableDays = Math.max(2, Math.ceil((distanceKm || 500) / 150));
               routeDays = rawDays <= maxReasonableDays ? rawDays : undefined;
             }
           }
