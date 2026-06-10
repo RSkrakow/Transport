@@ -129,6 +129,12 @@ export default function DyspozytorzyPage() {
   const [weekLabel, setWeekLabel] = useState("");
   const [eurRate, setEurRate] = useState(4.27);
   const [fuelPrice, setFuelPrice] = useState(1.25);
+
+  // Sync fuel price and EUR rate from settings when they load from Supabase
+  useEffect(() => {
+    if (settings.fuelPriceEurL) setFuelPrice(settings.fuelPriceEurL);
+    if (settings.plnEurRate)    setEurRate(settings.plnEurRate);
+  }, [settings.fuelPriceEurL, settings.plnEurRate]);
   // Filters
   const [vehicleTypeFilter, setVehicleTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");
   const [configTypeFilter, setConfigTypeFilter] = useState<"all" | "ciągnik" | "naczepa">("all");

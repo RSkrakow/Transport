@@ -1,6 +1,6 @@
 ﻿"use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import { supabase } from "@/lib/supabase";
 import { calculateRoute, profitabilityLabel, euroClass as deriveEuroClass, FLEET } from "@/lib/calculator";
@@ -104,6 +104,12 @@ export default function AnalizaPage() {
   const [fuelPrice, setFuelPrice] = useState(1.25);
   const [sortKey, setSortKey] = useState<keyof RouteRow>("marginPct");
   const [sortDesc, setSortDesc] = useState(false);
+
+  // Sync fuel price and EUR rate from settings when they load from Supabase
+  useEffect(() => {
+    if (settings.fuelPriceEurL) setFuelPrice(settings.fuelPriceEurL);
+    if (settings.plnEurRate)    setEurRate(settings.plnEurRate);
+  }, [settings.fuelPriceEurL, settings.plnEurRate]);
 
   // ORS verification state
   const [verifying, setVerifying] = useState(false);
