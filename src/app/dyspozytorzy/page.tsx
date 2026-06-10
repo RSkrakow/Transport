@@ -273,11 +273,13 @@ export default function DyspozytorzyPage() {
     for (const row of all.slice(hIdx + 1)) {
       const oNr = get(row, "Nr pełny", "Nr pe");
       if (!oNr) continue;
-      // Preferuj km wg licznika (odometr) nad mapą — rzeczywiste km na trasie
-      const dKmLadOdo   = parseFloat(get(row, "lad. wg licznika") || "0");
-      const dKmPusteOdo = parseFloat(get(row, "puste wg licznika") || "0");
-      const dKmMapLad   = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
-      const dKm = dKmLadOdo > 0 ? dKmLadOdo + dKmPusteOdo : dKmMapLad;
+      // Pre-pass: używaj tych samych km co main-loop (ładowne wg licznika lub ładowne wg mapy)
+      // WAŻNE: nie sumuj ładowne+puste tutaj — main-loop używa tylko ładownych jako distanceKm,
+      // więc pre-pass i main-loop muszą zgadzać się na tej samej wartości żeby perDobeShareFactor=1.0
+      // dla tras będących jedyną trasą ciągnika w danym dniu.
+      const dKmLadOdo = parseFloat(get(row, "lad. wg licznika") || "0");
+      const dKmMapLad = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+      const dKm = dKmLadOdo > 0 ? dKmLadOdo : dKmMapLad;
       if (dKm < 10) continue;
       const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
       const pickupR = get(row, "podjęcie", "podjecie", "data załadunku");
