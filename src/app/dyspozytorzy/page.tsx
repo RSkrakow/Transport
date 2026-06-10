@@ -1161,7 +1161,6 @@ export default function DyspozytorzyPage() {
           )}
         </div>
       )}
-
       {/* ── Config ── */}
       {activeTab === "config" && (
         <div className="space-y-5">
