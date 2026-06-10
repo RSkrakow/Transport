@@ -273,7 +273,11 @@ export default function DyspozytorzyPage() {
     for (const row of all.slice(hIdx + 1)) {
       const oNr = get(row, "Nr pełny", "Nr pe");
       if (!oNr) continue;
-      const dKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+      // Preferuj km wg licznika (odometr) nad mapą — rzeczywiste km na trasie
+      const dKmLadOdo   = parseFloat(get(row, "lad. wg licznika") || "0");
+      const dKmPusteOdo = parseFloat(get(row, "puste wg licznika") || "0");
+      const dKmMapLad   = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+      const dKm = dKmLadOdo > 0 ? dKmLadOdo + dKmPusteOdo : dKmMapLad;
       if (dKm < 10) continue;
       const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
       const pickupR = get(row, "podjęcie", "podjecie", "data załadunku");
@@ -290,16 +294,28 @@ export default function DyspozytorzyPage() {
       const orderNr = get(row, "Nr pełny", "Nr pe");
       if (!orderNr) continue;
 
-      // km ładowne — fallback "km wg" (kolumna wg mapy), unified with analiza
-      const distanceKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
-      if (distanceKm < 10) continue;
+      // km wg licznika (odometr) — rzeczywiste km przejechane; fallback: km wg mapy
+      const kmLadOdo   = parseFloat(get(row, "lad. wg licznika") || "0");
+      const kmPusteOdo = parseFloat(get(row, "puste wg licznika") || "0");
+      const kmLadMapa  = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+      const kmPusteMapa = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
 
-      // Empty/deadhead km — increases fuel/service costs but not revenue
-      const emptyKmRaw = parseFloat(get(row, "puste km", "km puste", "km pusty", "km empty") || "0");
-      const emptyKm = emptyKmRaw > 0 ? emptyKmRaw : undefined;
+      // Preferuj licznik: distanceKm = ładowne wg licznika, emptyKm = puste wg licznika
+      const distanceKm = kmLadOdo > 0 ? kmLadOdo : kmLadMapa;
+      const emptyKm    = kmLadOdo > 0
+        ? (kmPusteOdo > 0 ? kmPusteOdo : undefined)
+        : (kmPusteMapa > 0 ? kmPusteMapa : undefined);
+      if (distanceKm < 10) continue;
 
       const frachtRaw = get(row, "fracht z wal", "fracht");
       let frachtEur = parseFracht(frachtRaw, eurRate);
+      // Niektóre trasy mają częściowy fracht (np. 800€) + dopłatę — "Stawka końcowa Xeuro" w Wymaganiach
+      const wymagania = get(row, "wymagania");
+      const stawkaMatch = wymagania.match(/stawka\s+ko[ńn]cowa\s+([\d\s,.]+)\s*[€eE]/i);
+      if (stawkaMatch) {
+        const finalRate = parseFloat(stawkaMatch[1].replace(/[\s]/g, "").replace(",", "."));
+        if (!isNaN(finalRate) && finalRate > frachtEur) frachtEur = finalRate;
+      }
       // NOTE: do NOT skip fracht=0 routes — estimate them like analiza does (see below)
 
       const vehicle    = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
@@ -494,14 +510,14 @@ export default function DyspozytorzyPage() {
         // Daily fixed-cost rate: driver + leasing/30 + trailerLeasing/30 + insurance/30
         // Use the breakdown of any route for per-day rates (avg if multiple)
         const bd = prev.breakdown;
-        // Estimate daily fixed cost: driver and per-dobe components
-        // Driver cost / routeDays gives daily driver rate
         const driverDailyRate = settings.driverDailyCost ?? 181.95;
-        // For leasing/insurance: use per-route cost / routeDays if >0
         const days = prev.routeDays || 1;
         const leasingDailyRate = (bd.leasing + bd.trailerLeasing) / days;
         const insuranceDailyRate = bd.insurance / days;
-        const dailyFixed = driverDailyRate + leasingDailyRate + insuranceDailyRate;
+        // Jeśli postój wypada między różnymi kierowcami — kierowca odszedł (lub nie dojechał),
+        // więc nie naliczamy jego dobówki za dni przestoju pojazdu.
+        const driverChanged = !!(prev.driverName && next.driverName && prev.driverName !== next.driverName);
+        const dailyFixed = (driverChanged ? 0 : driverDailyRate) + leasingDailyRate + insuranceDailyRate;
 
         gaps.push({
           prevRoute: prev,
@@ -1110,11 +1126,14 @@ export default function DyspozytorzyPage() {
                                       {/* Gap block */}
                                       {gap && (
                                         <div
-                                          title={`Postój: ${gap.idleDays} dni × stawka dzienna = ${Math.round(gap.idleCostEur)} EUR`}
+                                          title={`Postój: ${gap.idleDays} dni × stawka dzienna = ${Math.round(gap.idleCostEur)} EUR${gap.prevRoute.driverName !== gap.nextRoute.driverName ? ` (zmiana kierowcy: ${gap.prevRoute.driverName} → ${gap.nextRoute.driverName}, bez dobówki)` : ""}`}
                                           className="flex flex-col justify-center items-center bg-slate-100 border-y border-dashed border-slate-300 text-slate-500 px-2"
                                           style={{ minWidth: gapWidth }}>
                                           <span className="font-semibold text-red-500">{gap.idleDays}d</span>
                                           <span className="text-red-400">−{Math.round(gap.idleCostEur)}€</span>
+                                          {gap.prevRoute.driverName !== gap.nextRoute.driverName && (
+                                            <span className="text-[9px] text-amber-500 font-medium leading-tight text-center">↕kierowca</span>
+                                          )}
                                         </div>
                                       )}
                                     </div>
