@@ -57,6 +57,10 @@ interface RouteMetric {
   costPerKm: number;
   revenuePerKm: number;
   routeDays: number;
+  // Kontynuacja trasy — ten sam ciągnik, ten sam dzień
+  isContinuation: boolean;
+  perDobeShareFactor: number;
+  tripDate: string;
 }
 
 interface DispatcherKPI {
@@ -97,6 +101,18 @@ function parseFracht(s: string, eurRate: number): number {
   const num = parseFloat(m[1].replace(",", "."));
   if (isNaN(num)) return 0;
   return m[2] === "PLN" ? num / eurRate : num;
+}
+
+function toDateKey(s: string): string {
+  if (!s) return "";
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000) {
+    const d = new Date((n - 25569) * 86400 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  return s.length >= 10 ? s.slice(0, 10) : "";
 }
 
 // ─── Main page ────────────────────────────────────────────────
@@ -208,6 +224,22 @@ export default function DyspozytorzyPage() {
     const dispNameMap: Record<string, string> = {};
     for (const d of dispatchers) dispNameMap[d.id] = d.name;
 
+    // ── Pre-pass: buduj mapę ciągnik+data → łączna liczba km ──
+    const dayGroupTotalKm = new Map<string, number>();
+    for (const row of all.slice(hIdx + 1)) {
+      const oNr = get(row, "Nr pełny", "Nr pe");
+      if (!oNr) continue;
+      const dKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+      if (dKm < 10) continue;
+      const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+      const pickupR = get(row, "podjęcie", "podjecie", "data załadunku");
+      const tDate = toDateKey(pickupR);
+      if (veh && tDate) {
+        const k = `${veh}|${tDate}`;
+        dayGroupTotalKm.set(k, (dayGroupTotalKm.get(k) ?? 0) + dKm);
+      }
+    }
+
     const metrics: RouteMetric[] = [];
 
     for (const row of all.slice(hIdx + 1)) {
@@ -253,6 +285,7 @@ export default function DyspozytorzyPage() {
       };
       const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku");
       const deliveryRaw = get(row, "dostarczenie", "data rozładunku");
+      const tripDate    = toDateKey(pickupRaw);
       let routeDays: number | undefined;
       if (pickupRaw && deliveryRaw) {
         const d1 = parseExcelDate(pickupRaw), d2 = parseExcelDate(deliveryRaw);
@@ -260,6 +293,14 @@ export default function DyspozytorzyPage() {
           routeDays = Math.max(1, Math.round((d2.getTime()-d1.getTime())/86400000) + 1);
         }
       }
+
+      // Kontynuacja — ten sam ciągnik, ten sam dzień
+      const dayKey = vehicle && tripDate ? `${vehicle}|${tripDate}` : "";
+      const totalKmDay = dayKey ? (dayGroupTotalKm.get(dayKey) ?? distanceKm) : distanceKm;
+      const perDobeShareFactor = totalKmDay > distanceKm
+        ? Math.round((distanceKm / totalKmDay) * 10000) / 10000
+        : 1.0;
+      const isContinuation = perDobeShareFactor < 1.0;
 
       // Trailer leasing: (1) exact naczepa from TMS row, (2) fleet avg, (3) tier in calculator
       const trailerLeasingEurMo = (naczepaReg && trailerLeasingMap[naczepaReg])
@@ -278,6 +319,7 @@ export default function DyspozytorzyPage() {
         serviceCostKmOverride: vData?.service_cost_km ?? undefined,
         routeDays,
         overrideTollEur: tmsTollEur || undefined,
+        perDobeShareFactor,
       };
 
       // Estimate fracht when TMS has no invoice yet (fracht=0), using TMS margin/km
@@ -314,6 +356,7 @@ export default function DyspozytorzyPage() {
         },
         costPerKm: bd.costPerKm,
         revenuePerKm: bd.revenuePerKm,
+        isContinuation, perDobeShareFactor, tripDate,
       });
     }
 

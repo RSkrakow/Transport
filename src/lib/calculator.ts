@@ -23,6 +23,11 @@ export interface RouteInput {
   routeDays?: number;              // actual route duration in days (from TMS dates or ceil(km/570))
   vehicleYearProduced?: number;    // for service cost tier
   avoidHighways?: boolean;
+  // Udział w kosztach dziennych (0–1). Używane gdy ciągnik realizuje >1 zlecenie tego samego dnia.
+  // Proporcjonalny do km: zlecenie 180km z 480km łącznie → 0.375 (37.5% dniówki).
+  // Wpływa na: kierowca, leasing per_dobe, ubezpieczenie per_dobe.
+  // Koszty per km (paliwo, myto, serwis) — bez zmian.
+  perDobeShareFactor?: number;     // default 1.0 (pełna dniówka)
 }
 
 export interface CostBreakdown {
@@ -215,8 +220,10 @@ export function calculateRoute(input: RouteInput, settings?: CalcSettings): Cost
   const routeDays = input.routeDays && input.routeDays > 0
     ? input.routeDays
     : Math.max(1, Math.ceil(distanceKm / FLEET.driverKmPerDay));
+  // Udział w dniówce: <1.0 gdy ciągnik ma kilka zleceń tego dnia (proporcja km)
+  const perDobeShare = input.perDobeShareFactor ?? 1.0;
   const dailyCost = s.driverDailyCost ?? FLEET.driverDailyCostNet;
-  const driverCost = routeDays * dailyCost;
+  const driverCost = routeDays * dailyCost * perDobeShare;
 
   // 6. SERVICE — per-vehicle override (from Supabase) or fleet tier (new/old)
   // Uses totalKm (loaded + empty) — service/wear applies to all km driven
@@ -229,20 +236,20 @@ export function calculateRoute(input: RouteInput, settings?: CalcSettings): Cost
   const leasingMo = leasingEurMo
     ?? (isNewVehicle ? FLEET.leasingNewEurMo : FLEET.leasingOldEurMo);
   const leasingCost = s.leasingMethod === 'per_dobe'
-    ? (leasingMo / 30) * routeDays
+    ? (leasingMo / 30) * routeDays * perDobeShare
     : (leasingMo / fleetAvgKmMo) * distanceKm;
 
   // 7b. LEASING NACZEPY
   const trailerLeasingMo = input.trailerLeasingEurMo
     ?? (isNewVehicle ? FLEET.trailerLeasingNewEurMo : FLEET.trailerLeasingOldEurMo);
   const trailerLeasingCost = s.trailerLeasingMethod === 'per_dobe'
-    ? (trailerLeasingMo / 30) * routeDays
+    ? (trailerLeasingMo / 30) * routeDays * perDobeShare
     : (trailerLeasingMo / fleetAvgKmMo) * distanceKm;
 
   // 8. INSURANCE (OC+AC)
   const insuranceMo = input.insuranceEurMo ?? FLEET.insuranceEurMo;
   const insuranceCost = s.insuranceMethod === 'per_dobe'
-    ? (insuranceMo / 30) * routeDays
+    ? (insuranceMo / 30) * routeDays * perDobeShare
     : (insuranceMo / fleetAvgKmMo) * distanceKm;
 
   // ─── Totals ───────────────────────────────────────────────

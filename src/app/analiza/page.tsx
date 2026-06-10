@@ -43,6 +43,25 @@ interface RouteRow {
   labelColor: string;
   euroClass: number;      // 3 | 4 | 5 | 6 — derived from vehicle year
   ors?: OrsVerification;
+  // Kontynuacja trasy — ten sam ciągnik, ten sam dzień
+  isContinuation: boolean;     // true gdy ciągnik ma >1 zlecenie w tym samym dniu
+  perDobeShareFactor: number;  // udział w dniówce (0–1), proporcjonalny do km
+  tripDate: string;            // YYYY-MM-DD (data podjęcia) — do grupowania
+}
+
+// Normalizuje datę z TMS (serial Excel lub string) do YYYY-MM-DD dla grupowania
+function toDateKey(s: string): string {
+  if (!s) return "";
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000) {
+    // Excel serial: dni od 1900-01-01
+    const d = new Date((n - 25569) * 86400 * 1000);
+    return d.toISOString().slice(0, 10);
+  }
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  // fallback: pierwsze 10 znaków (np. "2026-05-12 08:00")
+  return s.length >= 10 ? s.slice(0, 10) : "";
 }
 
 function parseFracht(s: string): { amount: number; currency: string } {
@@ -162,6 +181,24 @@ export default function AnalizaPage() {
         return "";
       }
 
+      // ── Pre-pass: buduj mapę ciągnik+data → łączna liczba km w danym dniu ──
+      // Używane do proporcjonalnego podziału kosztów dniowych (kierowca/leasing/ubezp.)
+      // gdy ten sam ciągnik realizuje >1 zlecenie tego samego dnia.
+      const dayGroupTotalKm = new Map<string, number>();
+      for (const row of dataRows) {
+        const oNr = get(row, "Nr pełny", "Nr pe", "Nr ");
+        if (!oNr) continue;
+        const dKm = parseFloat(get(row, "km ład", "km wg", "Km") || "0");
+        if (dKm < 10) continue;
+        const veh = get(row, "ciągnik", "ciagnik", "pojazd").toUpperCase();
+        const pickupR = get(row, "podjęcie", "podjecie", "data załadunku", "załadunek");
+        const tDate = toDateKey(pickupR);
+        if (veh && tDate) {
+          const k = `${veh}|${tDate}`;
+          dayGroupTotalKm.set(k, (dayGroupTotalKm.get(k) ?? 0) + dKm);
+        }
+      }
+
       const computed: RouteRow[] = dataRows
         .map((row): RouteRow | null => {
           const orderNr = get(row, "Nr pełny", "Nr pe", "Nr ");
@@ -199,6 +236,7 @@ export default function AnalizaPage() {
           // Columns: "Podjęcie" (load date) and "Dostarczenie" (delivery date)
           const pickupRaw   = get(row, "podjęcie", "podjecie", "data załadunku", "załadunek");
           const deliveryRaw = get(row, "dostarczenie", "data rozładunku", "rozładunek");
+          const tripDate    = toDateKey(pickupRaw);
           let routeDays: number | undefined;
           if (pickupRaw && deliveryRaw) {
             const parseDate = (s: string) => {
@@ -217,6 +255,14 @@ export default function AnalizaPage() {
               routeDays = Math.max(1, diff + 1); // inclusive days
             }
           }
+
+          // Kontynuacja trasy — ten sam ciągnik, ten sam dzień → dziel koszty dzienne proporcjonalnie
+          const dayKey = vehicle && tripDate ? `${vehicle}|${tripDate}` : "";
+          const totalKmDay = dayKey ? (dayGroupTotalKm.get(dayKey) ?? distanceKm) : distanceKm;
+          const perDobeShareFactor = totalKmDay > distanceKm
+            ? Math.round((distanceKm / totalKmDay) * 10000) / 10000
+            : 1.0;
+          const isContinuation = perDobeShareFactor < 1.0;
 
           // TMS own margin/km — "Marża EUR na 1 KM z mapy"
           const tmsMarzaPerKmRaw = parseFloat(get(row, "marża eur na 1 km", "marża eur") || "0");
@@ -244,6 +290,7 @@ export default function AnalizaPage() {
               trailerLeasingEurMo,
               insuranceEurMo, serviceCostKmOverride, routeDays,
               overrideTollEur: tmsTollEur || undefined,
+              perDobeShareFactor,
             }, settings);
             frachtEur = Math.round((breakdown0.total + tmsMarzaPerKm * distanceKm) * 100) / 100;
             frachtEstimated = true;
@@ -261,11 +308,12 @@ export default function AnalizaPage() {
             trailerLeasingEurMo,
             insuranceEurMo, serviceCostKmOverride, routeDays,
             overrideTollEur: tmsTollEur || undefined,
+            perDobeShareFactor,
           }, settings);
 
           const { label, color } = noFreightData
             ? { label: "BRAK DANYCH", color: "slate" }
-            : profitabilityLabel(breakdown.marginPct);
+            : profitabilityLabel(breakdown.marginPct, settings.marginGoodPct, settings.marginLowPct);
 
           return {
             orderNr,
@@ -285,6 +333,7 @@ export default function AnalizaPage() {
             tollFromTms: tmsTollEur > 0,
             label, labelColor: color,
             euroClass: vehicleYear ? deriveEuroClass(vehicleYear) : 6,
+            isContinuation, perDobeShareFactor, tripDate,
           };
         })
         .filter((r): r is RouteRow => r !== null);
@@ -672,6 +721,16 @@ export default function AnalizaPage() {
                           E{r.euroClass}
                         </span>
                       </div>
+                      {r.isContinuation && (
+                        <div className="mt-0.5 flex items-center gap-1">
+                          <span
+                            className="inline-block px-1.5 py-0 rounded text-[10px] font-bold bg-violet-100 text-violet-700"
+                            title={`Kontynuacja: ciągnik ma kilka zleceń tego dnia. Udział w dniówce: ${(r.perDobeShareFactor * 100).toFixed(1)}% (proporcja km)`}
+                          >
+                            KONT. {(r.perDobeShareFactor * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                      )}
                       <div className="text-xs text-slate-400">{r.avgFuelL100} l/100</div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
