@@ -197,10 +197,14 @@ export function calculateRoute(input: RouteInput, settings?: CalcSettings): Cost
   const euroMult = EURO_MULTIPLIER[euro] ?? EURO_MULTIPLIER[6];
 
   let tollCost: number;
+  const emptyKm = input.emptyKm ?? 0;
   if (input.overrideTollEur != null && input.overrideTollEur > 0) {
-    // ORS gives real toll — apply EURO class correction factor for DE/AT/CH
-    // (ORS returns toll per vehicle without EURO class awareness)
-    tollCost = input.overrideTollEur;
+    // TMS records toll for laden route only — add return toll proportionally
+    // (same road back ≈ same toll rate, scaled by empty/laden km ratio)
+    const returnToll = distanceKm > 0 && emptyKm > 0
+      ? input.overrideTollEur * (emptyKm / distanceKm)
+      : 0;
+    tollCost = input.overrideTollEur + returnToll;
   } else {
     const countries = transitCountries && transitCountries.length > 0
       ? transitCountries
@@ -213,7 +217,8 @@ export function calculateRoute(input: RouteInput, settings?: CalcSettings): Cost
       return base * mult;
     });
     const avgToll = tollRates.reduce((a, b) => a + b, 0) / tollRates.length;
-    tollCost = (avgToll / 100) * distanceKm;
+    // Use totalKm (laden + empty) — truck pays toll both ways
+    tollCost = (avgToll / 100) * totalKm;
   }
 
   // 5. DRIVER — Model Dobowy
