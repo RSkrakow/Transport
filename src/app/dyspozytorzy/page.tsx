@@ -87,6 +87,8 @@ interface RouteMetric {
   tripDate: string;       // YYYY-MM-DD załadunek
   deliveryDate: string;   // YYYY-MM-DD dostarczenie (rzeczywiste > planowane)
   driverName: string;     // z kolumny "Kierowca 1"
+  tripTimestamp?: number;      // Unix ms — dla ułamkowych gap calculations
+  deliveryTimestamp?: number;  // Unix ms — dla ułamkowych gap calculations
 }
 
 interface DispatcherKPI {
@@ -150,6 +152,26 @@ function toDateKey(s: string): string {
 function daysBetween(a: string, b: string): number {
   if (!a || !b) return 0;
   return Math.round((new Date(b).getTime() - new Date(a).getTime()) / 86400000);
+}
+
+/** Parse TMS/Excel date string → Unix ms timestamp (zachowuje czas HH:MM dla ułamkowych dni) */
+function toTimestamp(s: string): number | undefined {
+  if (!s) return undefined;
+  // Excel serial (z czasem w ułamku doby)
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000) return Math.round((n - 25569) * 86400 * 1000);
+  // TMS: "DD-MM-YYYY HH:MM[:SS]" lub "DD-MM-YYYY"
+  const dmy = s.match(/^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (dmy) {
+    const iso = dmy[4]
+      ? `${dmy[3]}-${dmy[2]}-${dmy[1]}T${dmy[4]}:${dmy[5]}:${dmy[6] ?? "00"}`
+      : `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    const d = new Date(iso);
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  // ISO lub inny format JS
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d.getTime();
 }
 
 // ─── Main page ────────────────────────────────────────────────
@@ -356,13 +378,21 @@ export default function DyspozytorzyPage() {
       // Driver name from TMS
       const driverName = get(row, "kierowca 1", "kierowca1", "kierowca", "driver").trim();
 
-      // Route duration in days
+      // Route duration — ułamkowe dni na podstawie rzeczywistych timestamp-ów
+      // (np. trasa 6h = 0.25d, trasa 31h = 1.29d); totalKm = ładowne + puste dla sanity check
       let routeDays: number | undefined;
-      if (tripDate && deliveryDate && deliveryDate >= tripDate) {
+      const pickupTs   = toTimestamp(pickupRaw);
+      const deliveryTs = toTimestamp(deliveryRaw);
+      const totalKm    = distanceKm + (emptyKm ?? 0);
+      const maxReasonableDays = Math.max(2, Math.ceil((totalKm || 500) / 150));
+      if (pickupTs !== undefined && deliveryTs !== undefined && deliveryTs > pickupTs) {
+        const durationDays = (deliveryTs - pickupTs) / 86400000;
+        routeDays = durationDays <= maxReasonableDays
+          ? Math.round(durationDays * 100) / 100   // 2 miejsca dla kalkulacji, UI pokazuje 1
+          : undefined;
+      } else if (tripDate && deliveryDate && deliveryDate >= tripDate) {
+        // Fallback: całkowite dni kalendarzowe gdy brak dokładnych timestamp-ów
         const rawDays = Math.max(1, daysBetween(tripDate, deliveryDate) + 1);
-        // Sanity check: max możliwy czas to km / min prędkość 150 km/d (postojowe, promy)
-        // Jeśli data dostarczenia jest nierealna → fallback do km-based
-        const maxReasonableDays = Math.max(2, Math.ceil((distanceKm || 500) / 150));
         routeDays = rawDays <= maxReasonableDays ? rawDays : undefined;
       }
 
@@ -430,6 +460,8 @@ export default function DyspozytorzyPage() {
         revenuePerKm: bd.revenuePerKm,
         isContinuation, perDobeShareFactor, tripDate,
         deliveryDate, driverName,
+        tripTimestamp: pickupTs,
+        deliveryTimestamp: deliveryTs,
       });
     }
 
@@ -506,13 +538,16 @@ export default function DyspozytorzyPage() {
       // Sort routes by pickup date
       const sorted = [...routes].sort((a, b) => a.tripDate.localeCompare(b.tripDate));
 
-      // Compute gaps between consecutive routes
+      // Compute gaps between consecutive routes (ułamkowe godziny gdy timestampy dostępne)
       const gaps: RouteGap[] = [];
       for (let i = 0; i < sorted.length - 1; i++) {
         const prev = sorted[i];
         const next = sorted[i + 1];
         if (!prev.deliveryDate || !next.tripDate) continue;
-        const gap = daysBetween(prev.deliveryDate, next.tripDate);
+        // Preferuj timestamp dla dokładnych ułamków doby; fallback: dni kalendarzowe
+        const gap = (prev.deliveryTimestamp !== undefined && next.tripTimestamp !== undefined)
+          ? (next.tripTimestamp - prev.deliveryTimestamp) / 86400000
+          : daysBetween(prev.deliveryDate, next.tripDate);
         if (gap <= 0) continue; // overlapping or same-day: no idle
 
         // Daily fixed-cost rate: driver + leasing/30 + trailerLeasing/30 + insurance/30
@@ -535,12 +570,12 @@ export default function DyspozytorzyPage() {
         });
       }
 
-      // Unikalne dni kalendarzowe pokryte trasami (unika sumowania dla tras-overlap)
+      // Unikalne dni kalendarzowe pokryte trasami (ceil routeDays — trasa 0.25d też zajmuje 1 dzień)
       const activeDaySet = new Set<string>();
       for (const r of sorted) {
         if (!r.tripDate) continue;
         const start = new Date(r.tripDate);
-        const days  = r.routeDays || 1;
+        const days  = Math.ceil(r.routeDays ?? 1);
         for (let d = 0; d < days; d++) {
           const dt = new Date(start);
           dt.setUTCDate(dt.getUTCDate() + d);
@@ -928,7 +963,7 @@ export default function DyspozytorzyPage() {
                           <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
                           <td className="px-4 py-2 text-xs text-slate-600">{r.originCountry}→{r.destCountry}</td>
                           <td className="px-4 py-2 text-right text-xs text-slate-500">
-                            {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays}d</span>
+                            {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays?.toFixed(1)}d</span>
                           </td>
                           <td className="px-4 py-2 text-right text-xs font-medium">
                             {r.noFreightData ? <span className="text-slate-400 italic">brak fraktury</span> : Math.round(r.frachtEur).toLocaleString("pl-PL")}
@@ -1124,20 +1159,20 @@ export default function DyspozytorzyPage() {
                                     <div key={r.orderNr} className="flex items-stretch">
                                       {/* Route block */}
                                       <div
-                                        title={`${r.orderNr} | ${r.originCountry}→${r.destCountry} | ${r.routeDays}d | ${r.tripDate}→${r.deliveryDate} | ${r.marginEur >= 0 ? "+" : ""}${Math.round(r.marginEur)}€`}
+                                        title={`${r.orderNr} | ${r.originCountry}→${r.destCountry} | ${r.routeDays?.toFixed(1)}d | ${r.tripDate}→${r.deliveryDate} | ${r.marginEur >= 0 ? "+" : ""}${Math.round(r.marginEur)}€`}
                                         className={`${rColor} text-white flex flex-col justify-center items-center px-2 py-2 rounded-lg`}
                                         style={{ minWidth: routeWidth }}>
                                         <span className="font-semibold truncate max-w-full">{r.originCountry}→{r.destCountry}</span>
-                                        <span className="opacity-80">{r.routeDays}d</span>
+                                        <span className="opacity-80">{r.routeDays?.toFixed(1)}d</span>
                                         <span className="opacity-90 font-medium">{r.marginEur >= 0 ? "+" : ""}{Math.round(r.marginEur)}€</span>
                                       </div>
                                       {/* Gap block */}
                                       {gap && (
                                         <div
-                                          title={`Postój: ${gap.idleDays} dni × stawka dzienna = ${Math.round(gap.idleCostEur)} EUR${gap.prevRoute.driverName !== gap.nextRoute.driverName ? ` (zmiana kierowcy: ${gap.prevRoute.driverName} → ${gap.nextRoute.driverName}, bez dobówki)` : ""}`}
+                                          title={`Postój: ${gap.idleDays.toFixed(1)} d × stawka dzienna = ${Math.round(gap.idleCostEur)} EUR${gap.prevRoute.driverName !== gap.nextRoute.driverName ? ` (zmiana kierowcy: ${gap.prevRoute.driverName} → ${gap.nextRoute.driverName}, bez dobówki)` : ""}`}
                                           className="flex flex-col justify-center items-center bg-slate-100 border-y border-dashed border-slate-300 text-slate-500 px-2"
                                           style={{ minWidth: gapWidth }}>
-                                          <span className="font-semibold text-red-500">{gap.idleDays}d</span>
+                                          <span className="font-semibold text-red-500">{gap.idleDays.toFixed(1)}d</span>
                                           <span className="text-red-400">−{Math.round(gap.idleCostEur)}€</span>
                                           {gap.prevRoute.driverName !== gap.nextRoute.driverName && (
                                             <span className="text-[9px] text-amber-500 font-medium leading-tight text-center">↕kierowca</span>
@@ -1165,7 +1200,7 @@ export default function DyspozytorzyPage() {
                               </div>
                               <div className="px-4 py-3 text-center">
                                 <div className="text-xs text-slate-400 mb-0.5">Postoje</div>
-                                <div className="font-bold text-red-500">{s.idleDays} dni · {fmtEur(s.idleCostEur)}</div>
+                                <div className="font-bold text-red-500">{s.idleDays.toFixed(1)} d · {fmtEur(s.idleCostEur)}</div>
                               </div>
                               <div className="px-4 py-3 text-center">
                                 <div className="text-xs text-slate-400 mb-0.5">Marża tras</div>
@@ -1311,7 +1346,7 @@ export default function DyspozytorzyPage() {
         if (bd.toll / r.frachtEur > 0.25)
           diagnoses.push(`Myto stanowi ${(bd.toll/r.frachtEur*100).toFixed(0)}% frachtu — trasa przez drogi kraje (DE/AT/CH/FR)`);
         if (bd.driver / r.frachtEur > 0.35)
-          diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — ${r.routeDays} ${r.routeDays===1?"doba":"doby"} × 181,95 EUR = ${Math.round(bd.driver)} EUR przy frachcie ${Math.round(r.frachtEur)} EUR`);
+          diagnoses.push(`Koszt kierowcy ${(bd.driver/r.frachtEur*100).toFixed(0)}% frachtu — ${r.routeDays?.toFixed(1)} d × 181,95 EUR = ${Math.round(bd.driver)} EUR przy frachcie ${Math.round(r.frachtEur)} EUR`);
         if (r.distanceKm < 300)
           diagnoses.push(`Krótka trasa (${Math.round(r.distanceKm)} km) — wysokie koszty stałe (leasing, ubezp.) na małej odległości`);
         const totalLeasing = bd.leasing + bd.trailerLeasing;
@@ -1339,7 +1374,7 @@ export default function DyspozytorzyPage() {
                 <div>
                   <h2 className="text-lg font-bold">Analiza trasy — {r.orderNr}</h2>
                   <p className="text-sm opacity-90 font-semibold">{r.client}</p>
-                  <p className="text-sm opacity-80">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · {r.routeDays} {r.routeDays === 1 ? "doba" : r.routeDays < 5 ? "doby" : "dób"}</p>
+                  <p className="text-sm opacity-80">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · {r.routeDays?.toFixed(1)} d</p>
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-black">{fmtPct(r.marginPct)}</div>

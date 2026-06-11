@@ -68,6 +68,23 @@ function toDateKey(s: string): string {
   return s.length >= 10 ? s.slice(0, 10) : "";
 }
 
+/** Parse TMS/Excel date string → Unix ms timestamp (zachowuje czas HH:MM dla ułamkowych dni) */
+function toTimestamp(s: string): number | undefined {
+  if (!s) return undefined;
+  const n = parseFloat(s);
+  if (!isNaN(n) && n > 40000) return Math.round((n - 25569) * 86400 * 1000);
+  const dmy = s.match(/^(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  if (dmy) {
+    const iso = dmy[4]
+      ? `${dmy[3]}-${dmy[2]}-${dmy[1]}T${dmy[4]}:${dmy[5]}:${dmy[6] ?? "00"}`
+      : `${dmy[3]}-${dmy[2]}-${dmy[1]}`;
+    const d = new Date(iso);
+    if (!isNaN(d.getTime())) return d.getTime();
+  }
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? undefined : d.getTime();
+}
+
 function parseFracht(s: string): { amount: number; currency: string } {
   if (!s) return { amount: 0, currency: "EUR" };
   const str = String(s).replace(/\s/g, "");
@@ -267,24 +284,23 @@ export default function AnalizaPage() {
           const pickupRaw   = get(row, "podjęcie rzeczywiste", "podjecie rzeczywiste", "podjęcie", "podjecie", "data załadunku", "załadunek");
           const deliveryRaw = get(row, "dostarczenie rzeczywiste", "dostarczenie rzeczyw", "dostarczenie", "data rozładunku", "rozładunek");
           const tripDate    = toDateKey(pickupRaw);
+          // Route duration — ułamkowe dni na podstawie rzeczywistych timestamp-ów
           let routeDays: number | undefined;
-          if (pickupRaw && deliveryRaw) {
-            const parseDate = (s: string) => {
-              // Handle Excel serial number or date string
-              const n = parseFloat(s);
-              if (!isNaN(n) && n > 40000) {
-                // Excel serial date: days since 1900-01-01
-                return new Date((n - 25569) * 86400 * 1000);
-              }
-              return new Date(s);
-            };
-            const d1 = parseDate(pickupRaw);
-            const d2 = parseDate(deliveryRaw);
-            if (!isNaN(d1.getTime()) && !isNaN(d2.getTime())) {
-              const diff = Math.round((d2.getTime() - d1.getTime()) / 86400000);
-              const rawDays = Math.max(1, diff + 1); // inclusive days
-              // Sanity: jeśli data dostarczenia nierealna (błędna kolumna) → fallback do km-based
-              const maxReasonableDays = Math.max(2, Math.ceil((distanceKm || 500) / 150));
+          const pickupTs   = toTimestamp(pickupRaw);
+          const deliveryTs = toTimestamp(deliveryRaw);
+          const totalKm    = distanceKm + (emptyKmRaw > 0 ? emptyKmRaw : 0);
+          const maxReasonableDays = Math.max(2, Math.ceil((totalKm || 500) / 150));
+          if (pickupTs !== undefined && deliveryTs !== undefined && deliveryTs > pickupTs) {
+            const durationDays = (deliveryTs - pickupTs) / 86400000;
+            routeDays = durationDays <= maxReasonableDays
+              ? Math.round(durationDays * 100) / 100
+              : undefined;
+          } else if (pickupRaw && deliveryRaw) {
+            // Fallback: całkowite dni gdy brak dokładnych timestamp-ów
+            const d1 = new Date(toDateKey(pickupRaw));
+            const d2 = new Date(toDateKey(deliveryRaw));
+            if (!isNaN(d1.getTime()) && !isNaN(d2.getTime()) && d2 >= d1) {
+              const rawDays = Math.max(1, Math.round((d2.getTime() - d1.getTime()) / 86400000) + 1);
               routeDays = rawDays <= maxReasonableDays ? rawDays : undefined;
             }
           }
