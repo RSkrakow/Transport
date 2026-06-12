@@ -25,6 +25,8 @@ interface RouteRow {
   originCity: string;
   destCity: string;
   distanceKm: number;
+  emptyKm?: number;
+  totalKm: number;    // distanceKm + emptyKm
   frachtRaw: string;
   frachtEur: number;
   frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from TMS margin/km
@@ -374,7 +376,8 @@ export default function AnalizaPage() {
             client: get(row, "zleceniodawca", "klient"),
             vehicle: vehicle || "—",
             originCountry, destCountry, originCity, destCity,
-            distanceKm, frachtRaw,
+            distanceKm, emptyKm, totalKm,
+            frachtRaw,
             frachtEur: Math.round(frachtEur * 100) / 100,
             frachtEstimated, noFreightData,
             currency, avgFuelL100, tmsMarzaPerKm,
@@ -504,7 +507,7 @@ export default function AnalizaPage() {
   const verified       = displayRows.filter(r => r.ors && r.ors.status !== "error");
   const alertCount     = verified.filter(r => r.ors!.status === "alert").length;
   const warnCount      = verified.filter(r => r.ors!.status === "warn").length;
-  const totalKmTms     = verified.reduce((s, r) => s + r.distanceKm, 0);
+  const totalKmTms     = verified.reduce((s, r) => s + r.totalKm, 0);
   const totalKmOrs     = verified.reduce((s, r) => s + (r.ors?.distanceKm ?? 0), 0);
   const kmFleetDiff    = totalKmOrs - totalKmTms;
 
@@ -792,7 +795,7 @@ export default function AnalizaPage() {
                       <div className="text-xs text-slate-400">{r.avgFuelL100} l/100</div>
                     </td>
                     <td className="px-3 py-2.5 text-right text-slate-600">
-                      {r.distanceKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
+                      {r.totalKm.toLocaleString("pl-PL", { maximumFractionDigits: 0 })}
                     </td>
                     {showOrsColumns && (
                       <>

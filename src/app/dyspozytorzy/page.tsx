@@ -69,6 +69,7 @@ interface RouteMetric {
   destCountry: string;
   distanceKm: number;
   emptyKm?: number;
+  totalKm: number;    // distanceKm + emptyKm (łącznie ładowne + puste)
   frachtEur: number;
   frachtEstimated: boolean;   // true when fracht=0 in TMS → estimated from margin/km
   noFreightData: boolean;     // true when fracht=0 AND no TMS margin — no invoice data at all
@@ -446,6 +447,7 @@ export default function DyspozytorzyPage() {
         dispatcher_id: disp_id,
         dispatcherName: disp_id ? (dispNameMap[disp_id] ?? "—") : "Nieprzypisany",
         originCountry, destCountry, distanceKm, emptyKm,
+        totalKm: distanceKm + (emptyKm ?? 0),
         frachtEur, frachtEstimated, noFreightData,
         totalCost: bd.total, marginEur: bd.marginEur,
         marginPct: bd.marginPct, tollEur: bd.toll,
@@ -485,7 +487,7 @@ export default function DyspozytorzyPage() {
         ciagniki: vehs.filter(v => v.vehicle_type === "ciągnik").map(v => v.reg),
         naczepy:  vehs.filter(v => v.vehicle_type === "naczepa").map(v => v.reg),
         routes: routes.length, frachtEur, costEur, marginEur, marginPct,
-        kmTotal: Math.round(routes.reduce((s, r) => s + r.distanceKm, 0)),
+        kmTotal: Math.round(routes.reduce((s, r) => s + r.totalKm, 0)),
         losses:    routes.filter(r => r.marginPct < 0).length,
         lowMargin: routes.filter(r => r.marginPct >= 0 && r.marginPct < 5).length,
         breakeven: routes.filter(r => r.marginPct >= 5 && r.marginPct < 15).length,
@@ -509,7 +511,7 @@ export default function DyspozytorzyPage() {
         id: UNASSIGNED, name: "⚠ Nieprzypisane", vehicles: [], ciagniki: [], naczepy: [],
         routes: unassigned.length, frachtEur: fr, costEur: co,
         marginEur: fr-co, marginPct: fr > 0 ? (fr-co)/fr*100 : 0,
-        kmTotal: Math.round(unassigned.reduce((s,r)=>s+r.distanceKm,0)),
+        kmTotal: Math.round(unassigned.reduce((s,r)=>s+r.totalKm,0)),
         losses: unassigned.filter(r=>r.marginPct<0).length,
         lowMargin: unassigned.filter(r=>r.marginPct>=0&&r.marginPct<5).length,
         breakeven: unassigned.filter(r=>r.marginPct>=5&&r.marginPct<15).length,
@@ -676,8 +678,7 @@ export default function DyspozytorzyPage() {
         ...d.routeList.map(r => [
           r.orderNr, r.client, r.vehicle,
           `${r.originCountry} → ${r.destCountry}`,
-          Math.round(r.distanceKm), r.routeDays,
-          Math.round(r.distanceKm),
+          Math.round(r.totalKm), r.routeDays,
           Math.round(r.frachtEur), Math.round(r.totalCost), Math.round(r.marginEur),
           +r.marginPct.toFixed(1), r.label,
         ]),
@@ -841,7 +842,7 @@ export default function DyspozytorzyPage() {
                               🚌 {d.naczepy.length} NAC
                             </span>
                           )}
-                          <span className="text-[10px] text-slate-400">{filteredRoutes.length} tras · {Math.round(filteredRoutes.reduce((s,r)=>s+r.distanceKm,0)).toLocaleString("pl-PL")} km</span>
+                          <span className="text-[10px] text-slate-400">{filteredRoutes.length} tras · {Math.round(filteredRoutes.reduce((s,r)=>s+r.totalKm,0)).toLocaleString("pl-PL")} km</span>
                         </div>
                       </div>
                       <div className="text-right">
@@ -961,7 +962,7 @@ export default function DyspozytorzyPage() {
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Zleceniodawca</th>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Pojazd</th>
                         <th className="text-left px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Trasa</th>
-                        <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Km/d</th>
+                        <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">km(L+P)/d</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Fracht</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Koszty</th>
                         <th className="text-right px-4 py-2 text-xs font-semibold text-slate-500 uppercase">Marża</th>
@@ -978,7 +979,7 @@ export default function DyspozytorzyPage() {
                           <td className="px-4 py-2 font-mono text-xs font-semibold">{r.vehicle}</td>
                           <td className="px-4 py-2 text-xs text-slate-600">{r.originCountry}→{r.destCountry}</td>
                           <td className="px-4 py-2 text-right text-xs text-slate-500">
-                            {Math.round(r.distanceKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays?.toFixed(1)}d</span>
+                            {Math.round(r.totalKm).toLocaleString("pl-PL")}<span className="text-slate-400">/{r.routeDays?.toFixed(1)}d</span>
                           </td>
                           <td className="px-4 py-2 text-right text-xs font-medium">
                             {r.noFreightData ? <span className="text-slate-400 italic">brak fraktury</span> : Math.round(r.frachtEur).toLocaleString("pl-PL")}
@@ -1569,7 +1570,7 @@ export default function DyspozytorzyPage() {
                 <div>
                   <h2 className="text-lg font-bold">Analiza trasy — {r.orderNr}</h2>
                   <p className="text-sm opacity-90 font-semibold">{r.client}</p>
-                  <p className="text-sm opacity-80">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.distanceKm)} km · {r.routeDays?.toFixed(1)} d</p>
+                  <p className="text-sm opacity-80">{r.vehicle} · {r.originCountry} → {r.destCountry} · {Math.round(r.totalKm)} km (L+P) · {r.routeDays?.toFixed(1)} d</p>
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-black">{fmtPct(r.marginPct)}</div>
