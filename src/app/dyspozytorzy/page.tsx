@@ -41,6 +41,7 @@ interface RouteGap {
   nextRoute: RouteMetric;
   idleDays: number;     // calendar days between delivery[n] and pickup[n+1]
   idleCostEur: number;  // idleDays × dailyFixedRate
+  isServicePl: boolean; // pojazd w Polsce >2d — serwis, brak dobówki kierowcy
 }
 
 interface MonthlyVehicleSummary {
@@ -562,13 +563,17 @@ export default function DyspozytorzyPage() {
         // Jeśli postój wypada między różnymi kierowcami — kierowca odszedł (lub nie dojechał),
         // więc nie naliczamy jego dobówki za dni przestoju pojazdu.
         const driverChanged = !!(prev.driverName && next.driverName && prev.driverName !== next.driverName);
-        const dailyFixed = (driverChanged ? 0 : driverDailyRate) + leasingDailyRate + insuranceDailyRate;
+        // Postój >2 dni w Polsce = serwis / pojazd w kraju — kierowca nie pobiera diety
+        const isServicePl = gap > 2 && (prev.destCountry === "PL" || prev.destCountry === "pl");
+        const effectiveDriverRate = (driverChanged || isServicePl) ? 0 : driverDailyRate;
+        const dailyFixed = effectiveDriverRate + leasingDailyRate + insuranceDailyRate;
 
         gaps.push({
           prevRoute: prev,
           nextRoute: next,
           idleDays: gap,
           idleCostEur: Math.round(gap * dailyFixed * 100) / 100,
+          isServicePl,
         });
       }
 
@@ -1269,10 +1274,12 @@ export default function DyspozytorzyPage() {
                 idleHours: g.idleDays * 24,
                 idleCost: g.idleCostEur,
                 driverSame: g.prevRoute.driverName === g.nextRoute.driverName,
+                isServicePl: g.isServicePl,
               }))
             );
 
-            const gapComment = (h: number) => {
+            const gapComment = (h: number, isServicePl?: boolean) => {
+              if (isServicePl) return { text: `🔧 Serwis / pojazd w kraju (${Math.round(h)}h) — bez dobówki`, cls: "text-blue-600 font-medium" };
               if (h > 48) return { text: `⚠ Długi postój — brak ładunku (${Math.round(h)}h)`, cls: "text-red-600 font-semibold" };
               if (h > 16) return { text: "Nocleg + oczekiwanie na załadunek", cls: "text-amber-700" };
               if (h >  8) return { text: "Nocleg / odpoczynek kierowcy", cls: "text-amber-600" };
@@ -1381,8 +1388,8 @@ export default function DyspozytorzyPage() {
                                 </thead>
                                 <tbody className="divide-y divide-slate-100">
                                   {gaps.map((g, i) => {
-                                    const { text, cls } = gapComment(g.idleHours);
-                                    const rowBg = g.idleHours > 48 ? "bg-red-50" : g.idleHours > 16 ? "bg-amber-50" : "";
+                                    const { text, cls } = gapComment(g.idleHours, g.isServicePl);
+                                    const rowBg = g.isServicePl ? "bg-blue-50" : g.idleHours > 48 ? "bg-red-50" : g.idleHours > 16 ? "bg-amber-50" : "";
                                     return (
                                       <tr key={i} className={rowBg}>
                                         <td className="px-4 py-2 font-mono text-slate-600">{g.prevNr}</td>
