@@ -184,7 +184,7 @@ export default function DyspozytorzyPage() {
   const [monthlyData, setMonthlyData] = useState<MonthlyVehicleSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<"config" | "dashboard" | "routes" | "monthly">("dashboard");
+  const [activeTab, setActiveTab] = useState<"config" | "dashboard" | "routes" | "monthly" | "idle">("dashboard");
   const [selectedDispatcher, setSelectedDispatcher] = useState<string | null>(null);
   const [weekLabel, setWeekLabel] = useState("");
   const [eurRate, setEurRate] = useState(4.27);
@@ -742,7 +742,7 @@ export default function DyspozytorzyPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-slate-200">
-        {([["dashboard","📊 Dashboard"], ["routes","📋 Trasy"], ["monthly","📅 Bilans miesięczny"], ["config","⚙ Konfiguracja"]] as [string,string][]).map(([t,l]) => (
+        {([["dashboard","📊 Dashboard"], ["routes","📋 Trasy"], ["idle","⏸ Przestoje"], ["monthly","📅 Bilans miesięczny"], ["config","⚙ Konfiguracja"]] as [string,string][]).map(([t,l]) => (
           <button key={t} onClick={()=>setActiveTab(t as any)}
             className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
               activeTab===t ? "border-blue-600 text-blue-600 bg-blue-50" : "border-transparent text-slate-500 hover:text-slate-800"}`}>
@@ -779,20 +779,35 @@ export default function DyspozytorzyPage() {
           ) : (
 <>
               {/* Fleet totals */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                {[
-                  ["Łączny fracht", fmtEur(kpiData.reduce((s,d)=>s+d.frachtEur,0)), "text-slate-800"],
-                  ["Łączne koszty HBM", fmtEur(kpiData.reduce((s,d)=>s+d.costEur,0)), "text-slate-800"],
-                  ["Łączna marża", fmtEur(kpiData.reduce((s,d)=>s+d.marginEur,0)), kpiData.reduce((s,d)=>s+d.marginEur,0)>=0?"text-emerald-600":"text-red-600"],
-                  ["Śr. marża floty", fmtPct(kpiData.filter(d=>d.id!=="__unassigned__" && d.routes>0).reduce((s,d)=>s+d.marginPct,0)/Math.max(1,kpiData.filter(d=>d.id!=="__unassigned__"&&d.routes>0).length)), "text-slate-800"],
-                  ["Trasy ze stratą", kpiData.reduce((s,d)=>s+d.losses,0).toString(), kpiData.reduce((s,d)=>s+d.losses,0)>0?"text-red-600":"text-emerald-600"],
-                ].map(([label,val,cls])=>(
-                  <div key={label} className="card py-3">
-                    <p className="text-xs text-slate-500 uppercase tracking-wide">{label}</p>
-                    <p className={`text-xl font-bold mt-0.5 ${cls}`}>{val}</p>
+              {(() => {
+                const totalFracht = kpiData.reduce((s,d)=>s+d.frachtEur,0);
+                const totalCost   = kpiData.reduce((s,d)=>s+d.costEur,0);
+                const totalMargin = kpiData.reduce((s,d)=>s+d.marginEur,0);
+                const totalIdle   = monthlyData.reduce((s,x)=>s+x.idleCostEur,0);
+                const trueMargin  = totalMargin - totalIdle;
+                const truePct     = totalFracht > 0 ? trueMargin / totalFracht : 0;
+                const avgMargin   = kpiData.filter(d=>d.id!=="__unassigned__"&&d.routes>0).reduce((s,d)=>s+d.marginPct,0)/Math.max(1,kpiData.filter(d=>d.id!=="__unassigned__"&&d.routes>0).length);
+                return (
+                  <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+                    {[
+                      ["Łączny fracht",    fmtEur(totalFracht),  "text-slate-800",   ""],
+                      ["Łączne koszty HBM",fmtEur(totalCost),    "text-slate-800",   ""],
+                      ["Marża tras",       fmtEur(totalMargin),  totalMargin>=0?"text-emerald-600":"text-red-600", fmtPct(totalFracht>0?totalMargin/totalFracht:0)],
+                      ["Koszty postojów",  totalIdle>0?`−${fmtEur(totalIdle)}`:"brak danych", totalIdle>0?"text-amber-600":"text-slate-400",
+                        totalIdle>0&&totalFracht>0?`${(totalIdle/totalFracht*100).toFixed(1)}% frachtu`:""],
+                      ["Marża po postojach",fmtEur(trueMargin),  trueMargin>=0?(truePct>=0.05?"text-emerald-600":"text-amber-600"):"text-red-600", fmtPct(truePct)],
+                      ["Śr. marża/dyspo",  fmtPct(avgMargin),    "text-slate-800",   ""],
+                      ["Trasy ze stratą",  kpiData.reduce((s,d)=>s+d.losses,0).toString(), kpiData.reduce((s,d)=>s+d.losses,0)>0?"text-red-600":"text-emerald-600",""],
+                    ].map(([label,val,cls,sub])=>(
+                      <div key={label as string} className="card py-3">
+                        <p className="text-xs text-slate-500 uppercase tracking-wide leading-tight">{label}</p>
+                        <p className={`text-lg font-bold mt-0.5 ${cls}`}>{val}</p>
+                        {sub && <p className="text-xs text-slate-400 mt-0.5">{sub}</p>}
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                );
+              })()}
 
               {/* Per dispatcher cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -1227,6 +1242,186 @@ export default function DyspozytorzyPage() {
           )}
         </div>
       )}
+      {/* ── Przestoje ── */}
+      {activeTab === "idle" && (
+        <div className="space-y-4">
+          {monthlyData.length === 0 ? (
+            <div className="card py-16 text-center text-slate-400">
+              <div className="text-4xl mb-3">⏸</div>
+              <p className="text-sm">Wczytaj plik TMS z kolumnami dat załadunku i dostawy żeby zobaczyć analizę przestojów</p>
+            </div>
+          ) : (() => {
+            // flatten all gaps across all vehicles/months
+            const allGaps = monthlyData.flatMap(s =>
+              s.gaps.map(g => ({
+                vehicle: s.vehicle,
+                dispatcherName: s.routes[0]?.dispatcherName ?? "—",
+                prevNr: g.prevRoute.orderNr,
+                prevDest: g.prevRoute.destCountry,
+                prevDelivery: g.prevRoute.deliveryDate,
+                prevDeliveryTs: g.prevRoute.deliveryTimestamp,
+                nextNr: g.nextRoute.orderNr,
+                nextOrigin: g.nextRoute.originCountry,
+                nextPickup: g.nextRoute.tripDate,
+                nextPickupTs: g.nextRoute.tripTimestamp,
+                idleDays: g.idleDays,
+                idleHours: g.idleDays * 24,
+                idleCost: g.idleCostEur,
+                driverSame: g.prevRoute.driverName === g.nextRoute.driverName,
+              }))
+            );
+
+            const gapComment = (h: number) => {
+              if (h > 48) return { text: `⚠ Długi postój — brak ładunku (${Math.round(h)}h)`, cls: "text-red-600 font-semibold" };
+              if (h > 16) return { text: "Nocleg + oczekiwanie na załadunek", cls: "text-amber-700" };
+              if (h >  8) return { text: "Nocleg / odpoczynek kierowcy", cls: "text-amber-600" };
+              return { text: "Krótka przerwa / załadunek", cls: "text-slate-500" };
+            };
+
+            const totalIdleCost = allGaps.reduce((s,g)=>s+g.idleCost,0);
+            const longStops = allGaps.filter(g=>g.idleHours>48).length;
+            const totalFracht = kpiData.reduce((s,d)=>s+d.frachtEur,0);
+
+            // group by dispatcher → vehicle
+            const byDisp: Record<string, Record<string, typeof allGaps>> = {};
+            for (const g of allGaps) {
+              if (!byDisp[g.dispatcherName]) byDisp[g.dispatcherName] = {};
+              if (!byDisp[g.dispatcherName][g.vehicle]) byDisp[g.dispatcherName][g.vehicle] = [];
+              byDisp[g.dispatcherName][g.vehicle].push(g);
+            }
+            const dispOrder = Object.keys(byDisp).sort();
+
+            return (
+              <>
+                {/* Summary banner */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="card py-3">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide">Łączny koszt postojów</p>
+                    <p className="text-xl font-bold text-amber-600">−{fmtEur(totalIdleCost)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">{totalFracht>0?`${(totalIdleCost/totalFracht*100).toFixed(1)}% frachtu`:""}</p>
+                  </div>
+                  <div className="card py-3">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide">Marża tras</p>
+                    <p className="text-xl font-bold text-slate-700">{fmtEur(kpiData.reduce((s,d)=>s+d.marginEur,0))}</p>
+                  </div>
+                  <div className="card py-3">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide">Marża po odjęciu postojów</p>
+                    {(() => {
+                      const real = kpiData.reduce((s,d)=>s+d.marginEur,0) - totalIdleCost;
+                      return <p className={`text-xl font-bold ${real>=0?"text-emerald-600":"text-red-600"}`}>{fmtEur(real)}<span className="text-sm font-normal text-slate-400 ml-1">{totalFracht>0?`(${(real/totalFracht*100).toFixed(1)}%)`:""}</span></p>;
+                    })()}
+                  </div>
+                  <div className="card py-3">
+                    <p className="text-xs text-slate-500 uppercase tracking-wide">Długie postoje &gt;48h</p>
+                    <p className={`text-xl font-bold ${longStops>0?"text-red-600":"text-emerald-600"}`}>{longStops}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">z {allGaps.length} przerw łącznie</p>
+                  </div>
+                </div>
+
+                {/* Info */}
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">
+                  <b>Koszty postojów</b> to czas między rozładunkiem trasy N a załadunkiem trasy N+1 dla tego samego pojazdu.
+                  Kierowca i pojazd generują koszty stałe ({fmtEur(200)}/dzień) niezależnie od tego czy jedzie.
+                  Postoje &gt;48h to sygnał do analizy — brak zlecenia, awaria, weekend, oczekiwanie na załadunek?
+                </div>
+
+                {/* Per dispatcher sections */}
+                {dispOrder.map(dispName => {
+                  const vehicles = byDisp[dispName];
+                  const dispTotal = Object.values(vehicles).flat().reduce((s,g)=>s+g.idleCost,0);
+                  const dispLong  = Object.values(vehicles).flat().filter(g=>g.idleHours>48).length;
+
+                  return (
+                    <div key={dispName} className="space-y-2">
+                      {/* Dispatcher header */}
+                      <div className="flex items-center justify-between bg-slate-800 text-white px-5 py-3 rounded-xl">
+                        <span className="font-semibold">{dispName}</span>
+                        <div className="flex gap-6 text-sm">
+                          {dispLong > 0 && <span className="text-red-300">⚠ {dispLong} długich postojów</span>}
+                          <span>Koszt postojów: <b className="text-amber-300">−{fmtEur(dispTotal)}</b></span>
+                        </div>
+                      </div>
+
+                      {/* Per vehicle tables */}
+                      {Object.keys(vehicles).sort((a,b) => {
+                        const ca = vehicles[a].reduce((s,g)=>s+g.idleCost,0);
+                        const cb = vehicles[b].reduce((s,g)=>s+g.idleCost,0);
+                        return cb - ca; // sort by idle cost desc
+                      }).map(veh => {
+                        const gaps = vehicles[veh];
+                        const vehTotal = gaps.reduce((s,g)=>s+g.idleCost,0);
+                        const vehLong  = gaps.filter(g=>g.idleHours>48).length;
+
+                        return (
+                          <div key={veh} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                            {/* Vehicle header */}
+                            <div className="flex items-center justify-between px-5 py-2.5 bg-slate-50 border-b border-slate-200">
+                              <div className="flex items-center gap-3">
+                                <span className="font-bold text-slate-800 text-sm">🚛 {veh}</span>
+                                <span className="text-xs text-slate-400">{gaps.length} przerw</span>
+                                {vehLong > 0 && <span className="px-2 py-0.5 bg-red-100 text-red-700 text-xs font-semibold rounded-full">{vehLong}× &gt;48h</span>}
+                              </div>
+                              <span className="text-sm font-bold text-amber-600">−{fmtEur(vehTotal)}</span>
+                            </div>
+
+                            {/* Gaps table */}
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-slate-400 uppercase tracking-wide text-[10px]">
+                                    <th className="text-left px-4 py-2">Po trasie</th>
+                                    <th className="text-left px-3 py-2">Rozładunek</th>
+                                    <th className="text-left px-3 py-2">Kolejny załadunek</th>
+                                    <th className="text-right px-3 py-2">Godziny</th>
+                                    <th className="text-right px-3 py-2">Dni</th>
+                                    <th className="text-right px-3 py-2">Koszt</th>
+                                    <th className="text-left px-3 py-2">Komentarz</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {gaps.map((g, i) => {
+                                    const { text, cls } = gapComment(g.idleHours);
+                                    const rowBg = g.idleHours > 48 ? "bg-red-50" : g.idleHours > 16 ? "bg-amber-50" : "";
+                                    return (
+                                      <tr key={i} className={rowBg}>
+                                        <td className="px-4 py-2 font-mono text-slate-600">{g.prevNr}</td>
+                                        <td className="px-3 py-2 text-slate-600">
+                                          <span className="font-semibold">{g.prevDest}</span>
+                                          <span className="text-slate-400 ml-1">{g.prevDelivery}</span>
+                                        </td>
+                                        <td className="px-3 py-2 text-slate-600">
+                                          <span className="font-semibold">{g.nextOrigin}</span>
+                                          <span className="text-slate-400 ml-1">{g.nextPickup}</span>
+                                        </td>
+                                        <td className="px-3 py-2 text-right font-mono text-slate-700">{g.idleHours.toFixed(1)}h</td>
+                                        <td className="px-3 py-2 text-right font-mono text-slate-700">{g.idleDays.toFixed(2)}</td>
+                                        <td className="px-3 py-2 text-right font-bold text-amber-700">−{fmtEur(g.idleCost)}</td>
+                                        <td className={`px-3 py-2 ${cls}`}>{text}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                                <tfoot>
+                                  <tr className="bg-slate-50 border-t border-slate-200">
+                                    <td colSpan={5} className="px-4 py-2 text-xs font-semibold text-slate-600 uppercase">Suma postojów — {veh}</td>
+                                    <td className="px-3 py-2 text-right font-bold text-amber-700">−{fmtEur(vehTotal)}</td>
+                                    <td className="px-3 py-2 text-xs text-slate-400">{gaps.length} przerw · {gaps.filter(g=>g.idleHours>48).length} krytycznych</td>
+                                  </tr>
+                                </tfoot>
+                              </table>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </>
+            );
+          })()}
+        </div>
+      )}
+
       {/* ── Config ── */}
       {activeTab === "config" && (
         <div className="space-y-5">
