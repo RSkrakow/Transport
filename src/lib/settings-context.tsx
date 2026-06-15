@@ -6,8 +6,12 @@ import { type CalcSettings } from "@/lib/calculator";
 
 // ─── Full app settings (superset of CalcSettings) ────────────
 export interface AppSettings extends CalcSettings {
-  fuelPriceEurL: number;
-  plnEurRate:    number;
+  fuelPriceEurL:    number;
+  plnEurRate:       number;
+  // Budget module settings
+  kmTargetMo?:      number;   // min km/month per tractor (default 10 000)
+  tollEurPerKm?:    number;   // avg toll EUR/km (default 0.30)
+  budgetMarginPct?: number;   // target margin % (default 10)
 }
 
 export const SETTINGS_DEFAULTS: AppSettings = {
@@ -23,6 +27,9 @@ export const SETTINGS_DEFAULTS: AppSettings = {
   avgKmPerMonth:        11_667,
   marginGoodPct:        15,
   marginLowPct:         5,
+  kmTargetMo:           10_000,
+  tollEurPerKm:         0.30,
+  budgetMarginPct:      10,
 };
 
 interface SettingsCtx {
@@ -57,6 +64,9 @@ function rowsToSettings(rows: { key: string; value: string }[]): AppSettings {
     avgKmPerMonth:        Number(map.avg_km_per_month    ?? 11667),
     marginGoodPct:        Number(map.margin_good_pct     ?? 15),
     marginLowPct:         Number(map.margin_low_pct      ?? 5),
+    kmTargetMo:           Number(map.km_target_mo        ?? 10000),
+    tollEurPerKm:         Number(map.toll_eur_per_km     ?? 0.30),
+    budgetMarginPct:      Number(map.budget_margin_pct   ?? 10),
   };
 }
 
@@ -74,6 +84,9 @@ const FIELD_TO_KEY: Record<keyof AppSettings, string> = {
   avgKmPerMonth:        "avg_km_per_month",
   marginGoodPct:        "margin_good_pct",
   marginLowPct:         "margin_low_pct",
+  kmTargetMo:           "km_target_mo",
+  tollEurPerKm:         "toll_eur_per_km",
+  budgetMarginPct:      "budget_margin_pct",
 };
 
 // ─── Provider ────────────────────────────────────────────────

@@ -79,6 +79,12 @@ export default function RootLayout({
                   Serwis
                 </Link>
                 <Link
+                  href="/budzet"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  Budżet
+                </Link>
+                <Link
                   href="/import"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >
