@@ -73,6 +73,12 @@ export default function RootLayout({
                   Dyspozytorzy
                 </Link>
                 <Link
+                  href="/kola"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  Kółka
+                </Link>
+                <Link
                   href="/serwis"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >
