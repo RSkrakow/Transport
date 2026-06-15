@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import * as XLSX from "xlsx";
-import { parseExpenses, type ExpenseEntry } from "@/lib/expenseParser";
+import { parseKartotekaXLS, type ExpenseEntry } from "@/lib/expenseParser";
 import { parseDriversODS, type DriversSummary } from "@/lib/odsParser";
 
 // ── Types ─────────────────────────────────────────────────────
@@ -371,7 +371,7 @@ export default function ZarzadPage() {
     setLoad(`kart${idx}`, true);
     setTimeout(() => {
       try {
-        const result = parseExpenses(buf, 4.25);
+        const result = parseKartotekaXLS(buf, 4.25);
         const total = result.totalEur;
         updateMonth(idx, {
           kartotekaLoaded: true,
@@ -1159,5 +1159,3 @@ export default function ZarzadPage() {
         </div>
       )}
     </div>
-  );
-}
