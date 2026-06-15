@@ -92,52 +92,76 @@ function parseTmsRevenue(
   let headerRow = -1;
 
   // Priority keywords for fracht column (most specific first)
-  const FRACHT_KEYS = ["kwota frachtu", "fracht eur", "wartość frachtu", "fracht netto",
-                       "stawka fracht", "kwota eur", "kwota euro", "przychód", "fracht"];
-  // "stawka" alone is ambiguous (stawka kierowcy ≠ stawka frachtu) — only match if no specific key found
+  // "Fracht z walutą *" is the standard Rejestr Transportów column name
+  const FRACHT_KEYS = ["fracht z walutą", "kwota frachtu", "fracht eur", "wartość frachtu",
+                       "fracht netto", "stawka fracht", "kwota eur", "kwota euro", "przychód", "fracht"];
+
+  // Header row detection: must contain column-level keywords, NOT just title-row words like "zleceniodawca"
+  // A valid header row has "fracht" from "Fracht z walutą *", or "ciągnik", or "nr pełny", etc.
+  // We avoid matching "zleceni" alone (matches "Dane zlecenia" title rows).
+  const isHeaderRow = (row: unknown[]) => {
+    const joined = row.map((v) => String(v ?? "").toLowerCase()).join("|");
+    return (
+      joined.includes("fracht z walutą") ||
+      joined.includes("fracht eur") ||
+      joined.includes("kwota frachtu") ||
+      joined.includes("ciągnik") ||
+      joined.includes("ciagnik") ||
+      joined.includes("nr pełny") ||
+      joined.includes("nr zlecenia") ||
+      joined.includes("stawka końcow") ||
+      (joined.includes("fracht") && (joined.includes("ciągnik") || joined.includes("pojazd") || joined.includes("data utw"))) ||
+      (joined.includes("stawka") && (joined.includes("euro") || joined.includes("eur")) && joined.includes("km"))
+    );
+  };
 
   for (let r = 0; r < Math.min(rows.length, 15); r++) {
     const row = rows[r] as unknown[];
-    const joined = row.map((v) => String(v ?? "").toLowerCase()).join("|");
-    if (joined.includes("fracht") || joined.includes("zleceni") || joined.includes("przejazd") ||
-        (joined.includes("stawka") && (joined.includes("euro") || joined.includes("eur")))) {
-      headerRow = r;
-      // Pass 1: specific fracht keys
-      for (const key of FRACHT_KEYS) {
-        if (frachtCol !== -1) break;
-        row.forEach((v, i) => {
-          if (frachtCol !== -1) return;
-          if (String(v ?? "").toLowerCase().includes(key)) frachtCol = i;
-        });
-      }
-      // Pass 2: fallback — any "stawka" col that also has EUR or euro nearby
-      if (frachtCol === -1) {
-        row.forEach((v, i) => {
-          if (frachtCol !== -1) return;
-          const s = String(v ?? "").toLowerCase();
-          if (s.includes("stawka") && (s.includes("eur") || s.includes("euro"))) frachtCol = i;
-        });
-      }
-      // Pass 3: last resort — first "stawka" column (legacy behaviour)
-      if (frachtCol === -1) {
-        row.forEach((v, i) => {
-          if (frachtCol !== -1) return;
-          const s = String(v ?? "").toLowerCase();
-          if (s.includes("stawka") && !s.includes("kierow") && !s.includes("dzien") && !s.includes("dniów")) frachtCol = i;
-        });
-      }
+    if (!isHeaderRow(row)) continue;
+    headerRow = r;
+    // Pass 1: specific fracht keys
+    for (const key of FRACHT_KEYS) {
+      if (frachtCol !== -1) break;
       row.forEach((v, i) => {
-        const s = String(v ?? "").toLowerCase();
-        if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik") || s.includes("ciagnik")) && vehicleCol === -1) vehicleCol = i;
-        if ((s.includes("km") || s.includes("odleg")) && !s.includes("limit") && distCol === -1) distCol = i;
-        if ((s.includes("data") || s.includes("wyjazd") || s.includes("załadun") || s.includes("ładun")) && dateCol === -1) dateCol = i;
+        if (frachtCol !== -1) return;
+        if (String(v ?? "").toLowerCase().includes(key)) frachtCol = i;
       });
-      break;
     }
+    // Pass 2: fallback — any "stawka" col that also mentions EUR/euro
+    if (frachtCol === -1) {
+      row.forEach((v, i) => {
+        if (frachtCol !== -1) return;
+        const s = String(v ?? "").toLowerCase();
+        if (s.includes("stawka") && (s.includes("eur") || s.includes("euro"))) frachtCol = i;
+      });
+    }
+    // Pass 3: last resort — "stawka" not related to driver/day
+    if (frachtCol === -1) {
+      row.forEach((v, i) => {
+        if (frachtCol !== -1) return;
+        const s = String(v ?? "").toLowerCase();
+        if (s.includes("stawka") && !s.includes("kierow") && !s.includes("dzien") && !s.includes("dniów")) frachtCol = i;
+      });
+    }
+    row.forEach((v, i) => {
+      const s = String(v ?? "").toLowerCase();
+      if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik") || s.includes("ciagnik")) && vehicleCol === -1) vehicleCol = i;
+      // Prefer "km ład" (loaded km); avoid picking "puste" (empty run km)
+      if (distCol === -1 && (s.includes("km ład") || s === "km" || s.includes("km wg"))) distCol = i;
+      if (dateCol === -1 && (s.includes("data utw") || s.includes("data zał") || s.includes("data wyjazd") || s.includes("data załadun"))) dateCol = i;
+    });
+    // Fallback date: any "data" col if not found above
+    if (dateCol === -1) {
+      row.forEach((v, i) => {
+        if (dateCol !== -1) return;
+        if (String(v ?? "").toLowerCase().includes("data")) dateCol = i;
+      });
+    }
+    break;
   }
 
   if (headerRow === -1) {
-    // Fallback: assume first row is header
+    // Fallback: assume first non-empty row with most columns as header
     headerRow = 0;
     const row = rows[0] as unknown[];
     for (const key of FRACHT_KEYS) {
@@ -149,8 +173,8 @@ function parseTmsRevenue(
     }
     row.forEach((v, i) => {
       const s = String(v ?? "").toLowerCase();
-      if ((s.includes("pojazd") || s.includes("nr rej")) && vehicleCol === -1) vehicleCol = i;
-      if (s.includes("km") && distCol === -1) distCol = i;
+      if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik")) && vehicleCol === -1) vehicleCol = i;
+      if (s.includes("km ład") && distCol === -1) distCol = i;
       if (s.includes("data") && dateCol === -1) dateCol = i;
     });
   }
