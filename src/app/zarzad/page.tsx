@@ -58,7 +58,8 @@ function emptyMonth(label: string): MonthData {
 // ── TMS Parser (simplified — revenue extraction) ───────────────
 
 function parseTmsRevenue(
-  buffer: ArrayBuffer
+  buffer: ArrayBuffer,
+  filterMonth?: string   // "YYYY-MM" — jeśli podany, filtruje tylko ten miesiąc
 ): { revenue: number; routes: TmsRoute[]; label: string } {
   const wb = XLSX.read(buffer, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
@@ -131,20 +132,25 @@ function parseTmsRevenue(
         ? parseFloat(String(row[distCol] ?? "0").replace(",", ".")) || 0
         : 0;
 
-    // Date for label detection
+    // Date for label detection + month filter
+    let rowMonth = "";
     if (dateCol >= 0 && row[dateCol]) {
       const ds = String(row[dateCol]).trim();
       const n = parseFloat(ds);
       if (!isNaN(n) && n > 40000) {
         const d = new Date((n - 25569) * 86400 * 1000);
-        months.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+        rowMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
       } else {
         const m = ds.match(/(\d{4})[.\-/](\d{2})/);
-        if (m) months.add(`${m[1]}-${m[2]}`);
+        if (m) rowMonth = `${m[1]}-${m[2]}`;
         const m2 = ds.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/);
-        if (m2) months.add(`${m2[3]}-${m2[2]}`);
+        if (m2) rowMonth = `${m2[3]}-${m2[2]}`;
       }
+      if (rowMonth) months.add(rowMonth);
     }
+
+    // Skip if filter active and row doesn't match
+    if (filterMonth && rowMonth && rowMonth !== filterMonth) continue;
 
     if (fracht > 0) {
       revenue += fracht;
@@ -349,7 +355,11 @@ export default function ZarzadPage() {
     setLoad(`tms${idx}`, true);
     setTimeout(() => {
       try {
-        const { revenue, routes, label } = parseTmsRevenue(buf);
+        // If user set a YYYY-MM label before upload, use it as month filter
+        const existingLabel = months[idx].label;
+        const isMonthLabel = /^\d{4}-\d{2}$/.test(existingLabel);
+        const filterMonth = isMonthLabel ? existingLabel : undefined;
+        const { revenue, routes, label } = parseTmsRevenue(buf, filterMonth);
         updateMonth(idx, {
           tmsLoaded: true,
           tmsFileName: name,
@@ -372,12 +382,18 @@ export default function ZarzadPage() {
     setTimeout(() => {
       try {
         const result = parseKartotekaXLS(buf, 4.25);
-        const total = result.totalEur;
+        // Filter entries to matching month if label is set
+        const existingLabelK = months[idx].label;
+        const isMonthLabelK = /^\d{4}-\d{2}$/.test(existingLabelK);
+        const filteredEntries = isMonthLabelK
+          ? result.entries.filter((e) => e.yearMonth === existingLabelK)
+          : result.entries;
+        const total = filteredEntries.reduce((s, e) => s + e.amountEur, 0);
         updateMonth(idx, {
           kartotekaLoaded: true,
           kartotekaFileName: name,
-          kartotekaTotal: total,
-          kartotekaEntries: result.entries,
+          kartotekaTotal: Math.round(total * 100) / 100,
+          kartotekaEntries: filteredEntries,
           label: months[idx].label.startsWith("Miesiąc") && result.months[0]
             ? result.months[0]
             : months[idx].label,
