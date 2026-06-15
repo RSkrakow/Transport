@@ -60,11 +60,26 @@ function emptyMonth(label: string): MonthData {
 
 // ── TMS Parser (simplified — revenue extraction) ───────────────
 
+/** Extract numeric EUR/PLN amount from a cell (string or number) */
+function parseCurrencyCell(val: unknown): number {
+  if (typeof val === "number") return val;
+  const raw = String(val ?? "").replace(/\s/g, ""); // strip spaces incl. nbsp
+  if (!raw) return 0;
+  // Patterns: "1234,56EUR" | "1234.56EUR" | "1234,56euro" | "€1234,56" | plain "1234,56"
+  // First try: digits with optional comma/period separator, optionally followed by eur/euro/€
+  const m = raw.match(/^[€$]?([\d]+(?:[.,][\d]+)?)/);
+  if (m) {
+    // Normalize: European comma → period
+    return parseFloat(m[1].replace(",", ".")) || 0;
+  }
+  return 0;
+}
+
 function parseTmsRevenue(
   buffer: ArrayBuffer,
   filterMonth?: string   // "YYYY-MM" — jeśli podany, filtruje tylko ten miesiąc
 ): { revenue: number; routes: TmsRoute[]; label: string; availableMonths: string[] } {
-  const wb = XLSX.read(buffer, { type: "array" });
+  const wb = XLSX.read(new Uint8Array(buffer), { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true });
 
@@ -76,34 +91,79 @@ function parseTmsRevenue(
   let frachtCol = -1, vehicleCol = -1, distCol = -1, dateCol = -1;
   let headerRow = -1;
 
-  for (let r = 0; r < Math.min(rows.length, 10); r++) {
+  // Priority keywords for fracht column (most specific first)
+  const FRACHT_KEYS = ["kwota frachtu", "fracht eur", "wartość frachtu", "fracht netto",
+                       "stawka fracht", "kwota eur", "kwota euro", "przychód", "fracht"];
+  // "stawka" alone is ambiguous (stawka kierowcy ≠ stawka frachtu) — only match if no specific key found
+
+  for (let r = 0; r < Math.min(rows.length, 15); r++) {
     const row = rows[r] as unknown[];
     const joined = row.map((v) => String(v ?? "").toLowerCase()).join("|");
-    if (joined.includes("fracht") || joined.includes("stawka") || joined.includes("zleceni")) {
+    if (joined.includes("fracht") || joined.includes("zleceni") || joined.includes("przejazd") ||
+        (joined.includes("stawka") && (joined.includes("euro") || joined.includes("eur")))) {
       headerRow = r;
+      // Pass 1: specific fracht keys
+      for (const key of FRACHT_KEYS) {
+        if (frachtCol !== -1) break;
+        row.forEach((v, i) => {
+          if (frachtCol !== -1) return;
+          if (String(v ?? "").toLowerCase().includes(key)) frachtCol = i;
+        });
+      }
+      // Pass 2: fallback — any "stawka" col that also has EUR or euro nearby
+      if (frachtCol === -1) {
+        row.forEach((v, i) => {
+          if (frachtCol !== -1) return;
+          const s = String(v ?? "").toLowerCase();
+          if (s.includes("stawka") && (s.includes("eur") || s.includes("euro"))) frachtCol = i;
+        });
+      }
+      // Pass 3: last resort — first "stawka" column (legacy behaviour)
+      if (frachtCol === -1) {
+        row.forEach((v, i) => {
+          if (frachtCol !== -1) return;
+          const s = String(v ?? "").toLowerCase();
+          if (s.includes("stawka") && !s.includes("kierow") && !s.includes("dzien") && !s.includes("dniów")) frachtCol = i;
+        });
+      }
       row.forEach((v, i) => {
         const s = String(v ?? "").toLowerCase();
-        if ((s.includes("fracht") || s.includes("stawka")) && frachtCol === -1) frachtCol = i;
-        if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik")) && vehicleCol === -1) vehicleCol = i;
-        if ((s.includes("km") || s.includes("odleg")) && distCol === -1) distCol = i;
-        if ((s.includes("data") || s.includes("wyjazd")) && dateCol === -1) dateCol = i;
+        if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik") || s.includes("ciagnik")) && vehicleCol === -1) vehicleCol = i;
+        if ((s.includes("km") || s.includes("odleg")) && !s.includes("limit") && distCol === -1) distCol = i;
+        if ((s.includes("data") || s.includes("wyjazd") || s.includes("załadun") || s.includes("ładun")) && dateCol === -1) dateCol = i;
       });
       break;
     }
   }
 
   if (headerRow === -1) {
-    // Fallback: try first row as header
+    // Fallback: assume first row is header
     headerRow = 0;
     const row = rows[0] as unknown[];
+    for (const key of FRACHT_KEYS) {
+      if (frachtCol !== -1) break;
+      row.forEach((v, i) => {
+        if (frachtCol !== -1) return;
+        if (String(v ?? "").toLowerCase().includes(key)) frachtCol = i;
+      });
+    }
     row.forEach((v, i) => {
       const s = String(v ?? "").toLowerCase();
-      if (s.includes("fracht") || (s.includes("stawka") && s.includes("końcow"))) frachtCol = i;
       if ((s.includes("pojazd") || s.includes("nr rej")) && vehicleCol === -1) vehicleCol = i;
       if (s.includes("km") && distCol === -1) distCol = i;
       if (s.includes("data") && dateCol === -1) dateCol = i;
     });
   }
+
+  // Debug: log what was detected
+  const headerRowData = rows[headerRow] as unknown[] | undefined;
+  console.log(
+    "[TMS parser] headerRow:", headerRow,
+    "frachtCol:", frachtCol, "→", frachtCol >= 0 ? String(headerRowData?.[frachtCol] ?? "?") : "nie znaleziono",
+    "dateCol:", dateCol, "→", dateCol >= 0 ? String(headerRowData?.[dateCol] ?? "?") : "nie znaleziono",
+    "vehicleCol:", vehicleCol, "→", vehicleCol >= 0 ? String(headerRowData?.[vehicleCol] ?? "?") : "nie znaleziono",
+    "filterMonth:", filterMonth ?? "(brak)",
+  );
 
   // Try to detect label from date column values
   const months = new Set<string>();
@@ -115,16 +175,7 @@ function parseTmsRevenue(
     // Parse fracht
     let fracht = 0;
     if (frachtCol >= 0) {
-      const raw = String(row[frachtCol] ?? "").replace(/\s/g, "");
-      // Handle "Xeuro" pattern
-      const mEuro = raw.match(/([\d,.]+)\s*euro/i);
-      if (mEuro) {
-        fracht = parseFloat(mEuro[1].replace(",", ".")) || 0;
-      } else {
-        // Try to extract currency amount
-        const mNum = raw.match(/([\d]+[,.]?[\d]*)/);
-        if (mNum) fracht = parseFloat(mNum[1].replace(",", ".")) || 0;
-      }
+      fracht = parseCurrencyCell(row[frachtCol]);
     }
 
     const vehicle =
