@@ -156,7 +156,8 @@ export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): Par
     if (!row || row.length < 8) continue;
 
     const regRaw = String(row[COL.vehicleReg] ?? "").trim();
-    if (!regRaw || regRaw.toLowerCase() === "brak" || regRaw === "") continue;
+    // Brak przypisanego pojazdu → grupuj jako "INNE" (koszty ogólne)
+    const resolvedReg = (!regRaw || regRaw.toLowerCase() === "brak") ? "INNE" : regRaw;
 
     const dateRaw = row[COL.dateSerial];
     const yearMonth = toYearMonth(dateRaw);
@@ -191,7 +192,7 @@ export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): Par
 
     if (amountEur <= 0) continue;
 
-    const vehicleReg = normalizeReg(regRaw);
+    const vehicleReg = resolvedReg === "INNE" ? "INNE" : normalizeReg(resolvedReg);
     const entry: ExpenseEntry = {
       vehicleReg,
       yearMonth,
