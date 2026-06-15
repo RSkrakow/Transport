@@ -114,4 +114,19 @@ export default function RootLayout({
         </header>
 
         {/* ── Main ── */}
-        <main className="max-w-7xl
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <AppShell>{children}</AppShell>
+        </main>
+
+        {/* ── Footer ── */}
+        <footer className="mt-16 border-t border-slate-200 bg-white">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <p className="text-xs text-slate-400 text-center">
+              TruckCalc · HBM Audyt · Dane kalkulacyjne: Trimble FMS, kartoteka pojazdów, wydatki 2024-2025
+            </p>
+          </div>
+        </footer>
+      </body>
+    </html>
+  );
+}
