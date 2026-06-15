@@ -25,6 +25,7 @@ const CATEGORY_MAP: Record<string, ExpenseCategory> = {
   "paliwo":               "fuel",
   "autostrady":           "toll",
   "myto":                 "toll",
+  "parkingi":             "toll",     // parking + toll lumped together
   "leasing":              "leasing",
   "ubezpieczenie":        "insurance",
   "oc":                   "insurance",
@@ -33,9 +34,9 @@ const CATEGORY_MAP: Record<string, ExpenseCategory> = {
   "ad blue":              "adblue",
   "części":               "parts",
   "czesci":               "parts",
+  "koszt usług serwis":   "service",  // more specific first
   "koszt usług":          "service",
   "koszt uslug":          "service",
-  "koszt usług serwis":   "service",
   "serwis":               "service",
   "ogumienie":            "tires",
   "opony":                "tires",
@@ -171,17 +172,20 @@ export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): Par
     const currency = String(row[COL.currency] ?? "").toUpperCase().trim();
     const netRaw   = parseFloat(String(row[COL.netPln] ?? "0").replace(",", ".")) || 0;
     const euroRaw  = parseFloat(String(row[COL.euroVal] ?? "0").replace(",", ".")) || 0;
+    // Kartoteka stores exchange rate only for EUR invoices (~4.2x).
+    // For PLN entries kurs = 1.0 (not a real rate) — must use fallback.
     const kurs     = parseFloat(String(row[COL.exchangeRate] ?? "0").replace(",", ".")) || 0;
 
     let amountEur: number;
     if (euroRaw > 0) {
-      // Column 17 already contains EUR value — use it directly
+      // Column 17 "Euro" pre-calculated EUR value — use directly
       amountEur = euroRaw;
     } else if (currency === "EUR") {
       amountEur = netRaw;
     } else {
-      // PLN → EUR
-      const rate = kurs > 0 ? kurs : plnEurFallback;
+      // PLN → EUR: kurs is real exchange rate only when > 2 (e.g. 4.25)
+      // When kurs = 1.0 it means no conversion was recorded — use fallback rate
+      const rate = kurs > 2 ? kurs : plnEurFallback;
       amountEur = netRaw / rate;
     }
 
