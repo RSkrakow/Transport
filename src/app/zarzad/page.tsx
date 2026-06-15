@@ -155,7 +155,7 @@ function parseTmsRevenue(
     });
   }
 
-  // Debug: log what was detected
+  // Debug: log what was detected + first rows for format diagnosis
   const headerRowData = rows[headerRow] as unknown[] | undefined;
   console.log(
     "[TMS parser] headerRow:", headerRow,
@@ -164,6 +164,11 @@ function parseTmsRevenue(
     "vehicleCol:", vehicleCol, "→", vehicleCol >= 0 ? String(headerRowData?.[vehicleCol] ?? "?") : "nie znaleziono",
     "filterMonth:", filterMonth ?? "(brak)",
   );
+  // Print first 3 rows to help diagnose column structure
+  for (let dbgR = 0; dbgR < Math.min(3, rows.length); dbgR++) {
+    const dbgRow = rows[dbgR] as unknown[];
+    console.log(`[TMS parser] row[${dbgR}]:`, dbgRow.slice(0, 20).map((v, i) => `[${i}]=${String(v ?? "").substring(0, 30)}`).join("  "));
+  }
 
   // Try to detect label from date column values
   const months = new Set<string>();
