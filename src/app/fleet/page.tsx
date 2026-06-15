@@ -41,17 +41,28 @@ export default function FleetPage() {
 
   const [editVehicle, setEditVehicle] = useState<Vehicle | null>(null);
   const [saving, setSaving] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  // Active/inactive filter
+  const [filterActive, setFilterActive] = useState<"active" | "inactive" | "all">("active");
 
   useEffect(() => { loadVehicles(); }, []);
 
   async function loadVehicles() {
+    // Load ALL vehicles — no is_active filter here, we filter in UI
     const { data } = await supabase
       .from("vehicles")
       .select("id,reg,brand,model,vehicle_type,year_produced,odometer_km,avg_fuel_l100,leasing_eur_mo,leasing_brutto_eur_mo,insurance_eur_mo,service_cost_km,avg_km_month,is_active")
-      .eq("is_active", true)
       .order("vehicle_type,reg");
     setVehicles(data ?? []);
     setLoading(false);
+  }
+
+  async function toggleActive(v: Vehicle) {
+    setTogglingId(v.id);
+    await supabase.from("vehicles").update({ is_active: !v.is_active }).eq("id", v.id);
+    setTogglingId(null);
+    await loadVehicles();
   }
 
   async function saveVehicle(v: Vehicle) {
@@ -109,6 +120,10 @@ export default function FleetPage() {
 
   const filtered = useMemo(() => {
     let list = [...vehicles];
+
+    // Active / inactive filter
+    if (filterActive === "active")   list = list.filter(v => v.is_active);
+    if (filterActive === "inactive") list = list.filter(v => !v.is_active);
 
     if (search.trim()) {
       const q = search.toLowerCase();
@@ -170,15 +185,18 @@ export default function FleetPage() {
   const resetFilters = () => {
     setSearch(""); setFilterBrand("all"); setFilterYear("all");
     setFilterOdo("all"); setFilterLeasing("all");
+    // Don't reset filterActive — user picks that intentionally
   };
   const hasFilters = search || filterBrand !== "all" || filterYear !== "all" || filterOdo !== "all" || filterLeasing !== "all";
 
-  // Stats
-  const critical = vehicles.filter(v => (v.odometer_km ?? 0) >= 900_000).length;
-  const warn = vehicles.filter(v => (v.odometer_km ?? 0) >= 700_000 && (v.odometer_km ?? 0) < 900_000).length;
-  const withLeasing = vehicles.filter(v => v.leasing_eur_mo && v.leasing_eur_mo > 50).length;
-  const avgFuel = vehicles.filter(v => v.avg_fuel_l100).length > 0
-    ? (vehicles.reduce((s, v) => s + (v.avg_fuel_l100 ?? 0), 0) / vehicles.filter(v => v.avg_fuel_l100).length).toFixed(1)
+  // Stats (always on active vehicles for KPI bar)
+  const activeVehicles = vehicles.filter(v => v.is_active);
+  const inactiveCount  = vehicles.filter(v => !v.is_active).length;
+  const critical    = activeVehicles.filter(v => (v.odometer_km ?? 0) >= 900_000).length;
+  const warn        = activeVehicles.filter(v => (v.odometer_km ?? 0) >= 700_000 && (v.odometer_km ?? 0) < 900_000).length;
+  const withLeasing = activeVehicles.filter(v => v.leasing_eur_mo && v.leasing_eur_mo > 50).length;
+  const avgFuel = activeVehicles.filter(v => v.avg_fuel_l100).length > 0
+    ? (activeVehicles.reduce((s, v) => s + (v.avg_fuel_l100 ?? 0), 0) / activeVehicles.filter(v => v.avg_fuel_l100).length).toFixed(1)
     : "—";
 
   if (loading) return (
@@ -195,17 +213,46 @@ export default function FleetPage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Flota pojazdów</h1>
           <p className="text-slate-500 text-sm mt-1">
-            {vehicles.length} aktywnych ciągników · wyświetlono {filtered.length}
+            <span className="text-emerald-600 font-medium">{activeVehicles.length} aktywnych</span>
+            {inactiveCount > 0 && (
+              <span className="text-slate-400"> · <span className="text-slate-500">{inactiveCount} wyłączonych</span></span>
+            )}
+            <span className="text-slate-400"> · wyświetlono {filtered.length}</span>
           </p>
+        </div>
+
+        {/* Active / Inactive toggle */}
+        <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+          {(["active", "all", "inactive"] as const).map(opt => (
+            <button
+              key={opt}
+              onClick={() => setFilterActive(opt)}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                filterActive === opt
+                  ? opt === "inactive"
+                    ? "bg-white text-slate-500 shadow-sm"
+                    : "bg-white text-slate-800 shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              {opt === "active" ? `✅ Aktywne (${activeVehicles.length})`
+               : opt === "inactive" ? `⛔ Wyłączone (${inactiveCount})`
+               : `Wszystkie (${vehicles.length})`}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* KPI mini */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div className="card py-3">
-          <p className="text-xs text-slate-500 uppercase tracking-wide">Łącznie</p>
-          <p className="text-2xl font-bold text-slate-800 mt-0.5">{vehicles.length}</p>
-          <p className="text-xs text-slate-400">aktywnych ciągników</p>
+          <p className="text-xs text-slate-500 uppercase tracking-wide">Łącznie aktywnych</p>
+          <p className="text-2xl font-bold text-slate-800 mt-0.5">{activeVehicles.length}</p>
+          <p className="text-xs text-slate-400">
+            {inactiveCount > 0
+              ? <span className="text-slate-500">{inactiveCount} wyłączonych z eksploatacji</span>
+              : "wszystkie w eksploatacji"}
+          </p>
         </div>
         <div className={`card py-3 ${critical > 0 ? "border-l-4 border-red-500" : ""}`}>
           <p className="text-xs text-slate-500 uppercase tracking-wide">Krytyczne &gt;900k km</p>
@@ -310,6 +357,7 @@ export default function FleetPage() {
                 </th>
               ))}
               <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Ubezp. EUR/mc</th>
+              <th className="text-center px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
               <th className="text-center px-4 py-3 text-xs font-semibold text-slate-400 uppercase w-20"></th>
             </tr>
           </thead>
@@ -317,8 +365,19 @@ export default function FleetPage() {
             {filtered.length === 0 ? (
               <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-400 text-sm">Brak pojazdów spełniających kryteria</td></tr>
             ) : filtered.map(v => (
-              <tr key={v.id} className={`hover:bg-slate-50 transition-colors ${odoColor(v.odometer_km)}`}>
-                <td className="px-4 py-3 font-mono font-semibold text-slate-800">{v.reg}</td>
+              <tr key={v.id} className={`transition-colors ${
+                !v.is_active
+                  ? "opacity-50 bg-slate-50 hover:bg-slate-100"
+                  : `hover:bg-slate-50 ${odoColor(v.odometer_km)}`
+              }`}>
+                <td className="px-4 py-3 font-mono font-semibold text-slate-800">
+                  {v.reg}
+                  {!v.is_active && (
+                    <span className="ml-2 px-1.5 py-0.5 bg-slate-200 text-slate-500 text-[10px] font-bold rounded uppercase tracking-wide">
+                      Wyłączony
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-3">
                   <div className="font-medium text-slate-800">{v.brand ?? "—"}</div>
                   <div className="text-xs text-slate-400">{v.model ?? ""}</div>
@@ -352,6 +411,21 @@ export default function FleetPage() {
                   {v.insurance_eur_mo && v.insurance_eur_mo > 0
                     ? <span className="text-slate-700 text-sm">{fmt(Math.round(v.insurance_eur_mo))}</span>
                     : <span className="text-slate-400 text-xs">—</span>}
+                </td>
+                {/* Toggle active/inactive */}
+                <td className="px-4 py-3 text-center">
+                  <button
+                    onClick={() => toggleActive(v)}
+                    disabled={togglingId === v.id}
+                    title={v.is_active ? "Kliknij aby wyłączyć z eksploatacji" : "Kliknij aby przywrócić do eksploatacji"}
+                    className={`px-3 py-1 text-xs rounded-lg font-medium transition-colors disabled:opacity-40 ${
+                      v.is_active
+                        ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
+                    }`}
+                  >
+                    {togglingId === v.id ? "…" : v.is_active ? "✓ Aktywny" : "Wyłączony"}
+                  </button>
                 </td>
                 <td className="px-4 py-3 text-center">
                   <button onClick={() => setEditVehicle({...v})}
