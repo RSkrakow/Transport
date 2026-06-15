@@ -1159,3 +1159,5 @@ export default function ZarzadPage() {
         </div>
       )}
     </div>
+  );
+}
