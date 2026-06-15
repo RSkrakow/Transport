@@ -27,6 +27,8 @@ interface MonthData {
   tmsFileName: string;
   tmsRevenue: number;  // EUR
   tmsRoutes: TmsRoute[];
+  tmsBuf: ArrayBuffer | null;          // stored for re-parse on month change
+  tmsAvailableMonths: string[];        // all months detected in the file
   // Kartoteka
   kartotekaLoaded: boolean;
   kartotekaFileName: string;
@@ -49,6 +51,7 @@ function emptyMonth(label: string): MonthData {
   return {
     label,
     tmsLoaded: false, tmsFileName: "", tmsRevenue: 0, tmsRoutes: [],
+    tmsBuf: null, tmsAvailableMonths: [],
     kartotekaLoaded: false, kartotekaFileName: "", kartotekaTotal: 0, kartotekaEntries: [],
     odsLoaded: false, odsFileName: "", drivers: null, driversCostEur: 0, plnEurRate: 4.25,
     adminLoaded: false, adminFileName: "", adminTotal: 0, adminRows: [],
@@ -60,7 +63,7 @@ function emptyMonth(label: string): MonthData {
 function parseTmsRevenue(
   buffer: ArrayBuffer,
   filterMonth?: string   // "YYYY-MM" — jeśli podany, filtruje tylko ten miesiąc
-): { revenue: number; routes: TmsRoute[]; label: string } {
+): { revenue: number; routes: TmsRoute[]; label: string; availableMonths: string[] } {
   const wb = XLSX.read(buffer, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, raw: true });
@@ -158,12 +161,11 @@ function parseTmsRevenue(
     }
   }
 
-  if (months.size > 0) {
-    const sorted = Array.from(months).sort();
-    label = sorted[0];
-  }
+  const availableMonths = Array.from(months).sort();
+  // label: use filterMonth if filtering, otherwise first detected month
+  label = filterMonth ?? (availableMonths[0] ?? "");
 
-  return { revenue, routes, label };
+  return { revenue, routes, label, availableMonths };
 }
 
 // ── Admin XLSX Parser ─────────────────────────────────────────
@@ -359,18 +361,42 @@ export default function ZarzadPage() {
         const existingLabel = months[idx].label;
         const isMonthLabel = /^\d{4}-\d{2}$/.test(existingLabel);
         const filterMonth = isMonthLabel ? existingLabel : undefined;
-        const { revenue, routes, label } = parseTmsRevenue(buf, filterMonth);
+        const { revenue, routes, label, availableMonths } = parseTmsRevenue(buf, filterMonth);
         updateMonth(idx, {
           tmsLoaded: true,
           tmsFileName: name,
           tmsRevenue: Math.round(revenue * 100) / 100,
           tmsRoutes: routes,
+          tmsBuf: buf,
+          tmsAvailableMonths: availableMonths,
           label: months[idx].label.startsWith("Miesiąc") && label
             ? label
             : months[idx].label,
         });
       } catch {
         alert("Błąd parsowania pliku TMS. Sprawdź format.");
+      } finally {
+        setLoad(`tms${idx}`, false);
+      }
+    }, 10);
+  };
+
+  // Re-parse TMS with a different month (without re-uploading)
+  const handleTmsMonthChange = (idx: number, newMonth: string) => {
+    const m = months[idx];
+    if (!m.tmsBuf) return;
+    setLoad(`tms${idx}`, true);
+    setTimeout(() => {
+      try {
+        const { revenue, routes, label, availableMonths } = parseTmsRevenue(m.tmsBuf!, newMonth);
+        updateMonth(idx, {
+          tmsRevenue: Math.round(revenue * 100) / 100,
+          tmsRoutes: routes,
+          tmsAvailableMonths: availableMonths,
+          label,
+        });
+      } catch {
+        alert("Błąd re-parsowania TMS.");
       } finally {
         setLoad(`tms${idx}`, false);
       }
@@ -579,6 +605,23 @@ export default function ZarzadPage() {
                 onFile={(buf, name) => handleAdmin(idx, buf, name)}
                 loading={loading[`adm${idx}`]}
               />
+
+              {/* Month picker — shown when file has multiple months */}
+              {m.tmsLoaded && m.tmsAvailableMonths.length > 1 && (
+                <div className="flex items-center gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                  <span className="text-amber-700 font-medium whitespace-nowrap">📅 Miesiąc:</span>
+                  <select
+                    value={m.label}
+                    onChange={(e) => handleTmsMonthChange(idx, e.target.value)}
+                    className="flex-1 text-xs border border-amber-300 rounded px-1.5 py-0.5 bg-white text-slate-700 font-semibold"
+                  >
+                    {m.tmsAvailableMonths.map((mo) => (
+                      <option key={mo} value={mo}>{mo}</option>
+                    ))}
+                  </select>
+                  <span className="text-amber-600 text-[10px]">plik zawiera {m.tmsAvailableMonths.length} mies.</span>
+                </div>
+              )}
 
               {/* Quick status */}
               {m.tmsLoaded && (
