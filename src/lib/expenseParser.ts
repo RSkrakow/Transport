@@ -64,7 +64,7 @@ const COL = {
   netPln:       7,   // netto (PLN or EUR depending on waluta)
   currency:     8,   // waluta ("EUR" | "PLN")
   euroVal:      17,  // euro — value already in EUR (may be 0 or missing)
-  exchangeRate: 18,  // kurs PLN→EUR (e.g. 4.25)
+  exchangeRate: 18,  // kurs NBP: PLN→EUR (~4.25) for PLN rows; PLN/100 HUF (~1.19) for HUF rows
 } as const;
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -183,6 +183,12 @@ export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): Par
       amountEur = euroRaw;
     } else if (currency === "EUR") {
       amountEur = netRaw;
+    } else if (currency === "HUF") {
+      // NBP quotes HUF as PLN per 100 HUF (e.g. kurs=1.1937 → 1.1937 PLN/100 HUF)
+      // Use kurs from file if available, otherwise fallback to ~0.012 PLN/HUF
+      const plnPerHuf = kurs > 0 ? kurs / 100 : 0.012;
+      const plnAmount = netRaw * plnPerHuf;
+      amountEur = plnAmount / plnEurFallback;
     } else {
       // PLN → EUR: kurs is real exchange rate only when > 2 (e.g. 4.25)
       // When kurs = 1.0 it means no conversion was recorded — use fallback rate
