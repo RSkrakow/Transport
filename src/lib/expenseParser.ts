@@ -130,9 +130,14 @@ export interface ParseExpenseResult {
   vehicles:   string[];      // sorted unique reg numbers
   totalEur:   number;
   warnings:   string[];
+  inneRedistributedEur: number;  // total EUR redistributed from "INNE" entries
 }
 
-export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): ParseExpenseResult {
+export function parseKartotekaXLS(
+  file: ArrayBuffer,
+  plnEurFallback = 4.25,
+  distributeInne = true,   // jeśli true → koszty bez pojazdu dzielone proporcjonalnie
+): ParseExpenseResult {
   const wb = XLSX.read(file, { type: "array" });
   const ws = wb.Sheets[wb.SheetNames[0]];
   const raw: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
@@ -217,18 +222,77 @@ export function parseKartotekaXLS(file: ArrayBuffer, plnEurFallback = 4.25): Par
     cats[category] = Math.round((cats[category] + amountEur) * 100) / 100;
   }
 
+  // ── Proporcjonalny podział kosztów "INNE" (bez pojazdu) ──────
+  let inneRedistributedEur = 0;
+
+  if (distributeInne && expenseMap.has("INNE")) {
+    const inneMap = expenseMap.get("INNE")!;
+
+    for (const [yearMonth, inneCats] of inneMap) {
+      // Suma kosztów INNE w tym miesiącu
+      const inneMonthTotal = Object.values(inneCats).reduce((s, v) => s + v, 0);
+      if (inneMonthTotal <= 0) continue;
+
+      // Suma kosztów na pojazd w tym samym miesiącu (bez INNE)
+      const vehicleTotals = new Map<string, number>();
+      for (const [vreg, vMap] of expenseMap) {
+        if (vreg === "INNE") continue;
+        const cats = vMap.get(yearMonth);
+        if (!cats) continue;
+        const total = Object.values(cats).reduce((s, v) => s + v, 0);
+        if (total > 0) vehicleTotals.set(vreg, total);
+      }
+
+      if (vehicleTotals.size === 0) {
+        // Brak pojazdów w tym miesiącu — koszty ogólne zostają jako INNE
+        warnings.push(`${yearMonth}: INNE (${inneMonthTotal.toFixed(2)} EUR) — brak pojazdów do podziału`);
+        continue;
+      }
+
+      const fleetTotal = Array.from(vehicleTotals.values()).reduce((s, v) => s + v, 0);
+
+      // Rozdziel każdą kategorię proporcjonalnie
+      for (const [vreg, vTotal] of vehicleTotals) {
+        const share = vTotal / fleetTotal;
+        if (!expenseMap.has(vreg)) expenseMap.set(vreg, new Map());
+        const vMap = expenseMap.get(vreg)!;
+        if (!vMap.has(yearMonth)) vMap.set(yearMonth, emptyCategories());
+        const cats = vMap.get(yearMonth)!;
+
+        for (const cat of Object.keys(inneCats) as ExpenseCategory[]) {
+          const portion = inneCats[cat] * share;
+          if (portion > 0) {
+            cats[cat] = Math.round((cats[cat] + portion) * 100) / 100;
+          }
+        }
+      }
+
+      inneRedistributedEur = Math.round((inneRedistributedEur + inneMonthTotal) * 100) / 100;
+    }
+
+    // Usuń INNE z mapy — koszty rozdzielone
+    expenseMap.delete("INNE");
+    warnings.push(`Koszty bez pojazdu: ${inneRedistributedEur.toFixed(2)} EUR podzielone proporcjonalnie`);
+  }
+
   // Collect sorted unique months and vehicles
   const monthSet = new Set<string>();
   const vehicleSet = new Set<string>();
   for (const entry of entries) {
     monthSet.add(entry.yearMonth);
+    // Pomiń INNE w liście pojazdów gdy redystrybucja włączona
+    if (distributeInne && entry.vehicleReg === "INNE") continue;
     vehicleSet.add(entry.vehicleReg);
+  }
+  // Dodaj pojazdy z mapy (po redystrybucji mogły pojawić się nowe miesiące)
+  for (const vreg of expenseMap.keys()) {
+    vehicleSet.add(vreg);
   }
   const months   = Array.from(monthSet).sort();
   const vehicles = Array.from(vehicleSet).sort();
   const totalEur = Math.round(entries.reduce((s, e) => s + e.amountEur, 0) * 100) / 100;
 
-  return { entries, expenseMap, months, vehicles, totalEur, warnings };
+  return { entries, expenseMap, months, vehicles, totalEur, warnings, inneRedistributedEur };
 }
 
 // ── Helper: get total cost for vehicle/month ──────────────────
