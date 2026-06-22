@@ -18,6 +18,7 @@ const TRANSPORT_LINKS: { href: string; label: string }[] = [
   { href: "/kola",          label: "Kółka" },
   { href: "/serwis",        label: "Serwis" },
   { href: "/opony",         label: "Opony" },
+  { href: "/checklista",    label: "Checklista" },
   { href: "/budzet",        label: "Budżet" },
   { href: "/import",        label: "Import" },
   { href: "/konfiguracja",  label: "⚙️" },
@@ -25,9 +26,10 @@ const TRANSPORT_LINKS: { href: string; label: string }[] = [
 
 // ── Linki Serwis (ograniczony dostęp dla warsztatu) ───────────
 const SERWIS_LINKS: { href: string; label: string }[] = [
-  { href: "/serwis",       label: "Serwis" },
-  { href: "/opony",        label: "Opony" },
-  { href: "/konfiguracja", label: "⚙️" },
+  { href: "/serwis",        label: "Serwis" },
+  { href: "/opony",         label: "Opony" },
+  { href: "/checklista",    label: "Checklista" },
+  { href: "/konfiguracja",  label: "⚙️" },
 ];
 
 export default function NavBar() {
