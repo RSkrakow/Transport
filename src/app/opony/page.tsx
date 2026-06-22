@@ -334,18 +334,20 @@ function TrailerSVG({
 }
 
 // ══════════════════════════════════════════════════════════════
-// Panel szczegółów wybranej opony
+// Panel szczegółów wybranej opony (z formularzem montażu/edycji)
 // ══════════════════════════════════════════════════════════════
 function TireDetailPanel({
   positionId,
   vehicleReg,
   data,
   onClose,
+  onReload,
 }: {
   positionId: string;
   vehicleReg: string;
   data: TireDisplayData;
   onClose: () => void;
+  onReload: () => void;
 }) {
   const { tire, reading, status, treadMin } = data;
   const colors = STATUS_COLORS[status];
@@ -353,6 +355,81 @@ function TireDetailPanel({
 
   const allPositions = [...CIAGNIK_POSITIONS, ...NACZEPA_POSITIONS];
   const posDef = allPositions.find(p => p.id === positionId);
+
+  // Tryb edycji — domyślnie włączony gdy brak opony
+  const [editMode, setEditMode] = useState(!tire);
+  const [form, setForm] = useState({
+    brand: "", model: "", size: "", dot: "",
+    installed_date: new Date().toISOString().slice(0, 10),
+    installed_km: "", is_retreaded: false, notes: "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  // Wypełnij formularz istniejącymi danymi przy edycji
+  useEffect(() => {
+    if (tire) {
+      setForm({
+        brand:          tire.brand          ?? "",
+        model:          tire.model          ?? "",
+        size:           tire.size           ?? "",
+        dot:            tire.dot            ?? "",
+        installed_date: tire.installed_date ?? new Date().toISOString().slice(0, 10),
+        installed_km:   tire.installed_km   != null ? String(tire.installed_km) : "",
+        is_retreaded:   tire.is_retreaded,
+        notes:          tire.notes          ?? "",
+      });
+    }
+  }, [tire]);
+
+  // Reset trybu edycji gdy zmienia się pozycja
+  useEffect(() => { setEditMode(!tire); setMsg(null); }, [positionId, vehicleReg]);
+
+  async function handleSaveTire() {
+    if (!form.brand || !form.size) { setMsg("Marka i rozmiar są wymagane"); return; }
+    setSaving(true); setMsg(null);
+    try {
+      const payload = {
+        vehicle_reg:    vehicleReg,
+        position:       positionId,
+        brand:          form.brand,
+        model:          form.model          || null,
+        size:           form.size,
+        dot:            form.dot            || null,
+        installed_date: form.installed_date || null,
+        installed_km:   form.installed_km   ? parseInt(form.installed_km) : null,
+        is_retreaded:   form.is_retreaded,
+        status:         "active" as const,
+        notes:          form.notes          || null,
+      };
+      const { error } = await supabase
+        .from("tires")
+        .upsert(payload, { onConflict: "vehicle_reg,position" });
+      if (error) throw error;
+      setMsg("✓ Zapisano");
+      setEditMode(false);
+      onReload();
+    } catch (err: unknown) {
+      setMsg(`Błąd: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function field(label: string, key: keyof typeof form, type = "text", ph = "") {
+    return (
+      <div>
+        <label className="block text-xs text-slate-400 mb-1">{label}</label>
+        <input
+          type={type}
+          value={String(form[key])}
+          onChange={e => setForm(f => ({ ...f, [key]: e.target.value }))}
+          placeholder={ph}
+          className="w-full bg-slate-600 border border-slate-500 rounded px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="bg-slate-800 border border-slate-600 rounded-xl p-4 h-full">
@@ -363,18 +440,75 @@ function TireDetailPanel({
             {posDef?.label ?? positionId}
           </div>
           <div>
-            <div className="text-white font-semibold">{vehicleReg}</div>
+            <div className="text-white font-semibold text-sm">{vehicleReg}</div>
             <span className={`text-xs px-2 py-0.5 rounded font-medium ${colors.bg} text-white`}>
               {colors.label}
             </span>
           </div>
         </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded">✕</button>
+        <div className="flex items-center gap-2">
+          {tire && !editMode && (
+            <button
+              onClick={() => { setEditMode(true); setMsg(null); }}
+              className="text-xs text-slate-400 hover:text-blue-400 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+            >
+              ✏️ Edytuj
+            </button>
+          )}
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded">✕</button>
+        </div>
       </div>
 
-      {tire ? (
+      {/* ── Formularz montażu / edycji ── */}
+      {editMode ? (
         <div className="space-y-3 text-sm">
-          {/* Dane opony */}
+          <div className="text-slate-300 text-xs font-semibold uppercase tracking-wide mb-1">
+            {tire ? "Edytuj dane opony" : "Przypisz oponę do pozycji"}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            {field("Marka *",  "brand",  "text", "np. Michelin")}
+            {field("Model",    "model",  "text", "np. X MultiWay")}
+          </div>
+          {field("Rozmiar *", "size", "text", "315/70 R22.5")}
+          <div className="grid grid-cols-2 gap-2">
+            {field("DOT (WWRR)", "dot", "text", "np. 1524")}
+            {field("Data montażu", "installed_date", "date")}
+          </div>
+          {field("Stan km przy montażu", "installed_km", "number", "np. 450000")}
+          {field("Uwagi", "notes", "text", "np. bieżnikowana Bandag")}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.is_retreaded}
+              onChange={e => setForm(f => ({ ...f, is_retreaded: e.target.checked }))}
+              className="w-4 h-4 rounded accent-blue-500"
+            />
+            <span className="text-slate-300 text-sm">Opona bieżnikowana</span>
+          </label>
+          <div className="flex items-center gap-2 pt-1">
+            <button
+              onClick={handleSaveTire}
+              disabled={saving || !form.brand || !form.size}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition-colors"
+            >
+              {saving ? "Zapisuję..." : "Zapisz"}
+            </button>
+            {tire && (
+              <button
+                onClick={() => { setEditMode(false); setMsg(null); }}
+                className="text-slate-400 hover:text-white text-sm px-3 py-1.5 rounded"
+              >
+                Anuluj
+              </button>
+            )}
+            {msg && (
+              <span className={`text-xs ${msg.startsWith("✓") ? "text-green-400" : "text-red-400"}`}>{msg}</span>
+            )}
+          </div>
+        </div>
+      ) : tire ? (
+        /* ── Widok danych ── */
+        <div className="space-y-3 text-sm">
           <div className="bg-slate-700/50 rounded-lg p-3 space-y-1.5">
             <div className="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">Opona</div>
             <Row label="Marka / model" value={[tire.brand, tire.model].filter(Boolean).join(" ") || "—"} />
@@ -389,10 +523,12 @@ function TireDetailPanel({
             )}
             <Row label="Bieżnikowana" value={tire.is_retreaded ? "Tak" : "Nie"} />
             {tire.installed_date && <Row label="Zamontowana" value={tire.installed_date} />}
-            {tire.installed_km != null && <Row label="Stan km montażu" value={`${tire.installed_km.toLocaleString("pl-PL")} km`} />}
+            {tire.installed_km != null && (
+              <Row label="Stan km montażu" value={`${tire.installed_km.toLocaleString("pl-PL")} km`} />
+            )}
+            {tire.notes && <Row label="Uwagi" value={tire.notes} />}
           </div>
 
-          {/* Ostatnie odczyty */}
           {reading ? (
             <div className="bg-slate-700/50 rounded-lg p-3 space-y-1.5">
               <div className="text-slate-400 text-xs font-semibold uppercase tracking-wide mb-2">Ostatnia inspekcja</div>
@@ -429,17 +565,8 @@ function TireDetailPanel({
               Brak pomiarów — dodaj inspekcję
             </div>
           )}
-          {tire.notes && (
-            <div className="text-slate-400 text-xs bg-slate-700/30 rounded p-2">{tire.notes}</div>
-          )}
         </div>
-      ) : (
-        <div className="text-slate-500 text-sm text-center py-8">
-          <div className="text-3xl mb-2">🔧</div>
-          <div>Brak danych opony</div>
-          <div className="text-xs mt-1">Wypełnij formularz inspekcji</div>
-        </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -1210,6 +1337,7 @@ export default function OponyPage() {
                     vehicleReg={selectedPos.vehicleReg}
                     data={selectedData}
                     onClose={() => setSelectedPos(null)}
+                    onReload={loadTireData}
                   />
                 </div>
               )}
