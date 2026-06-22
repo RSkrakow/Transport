@@ -85,6 +85,12 @@ export default function RootLayout({
                   Serwis
                 </Link>
                 <Link
+                  href="/opony"
+                  className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
+                >
+                  Opony
+                </Link>
+                <Link
                   href="/budzet"
                   className="px-3 py-1.5 rounded-md text-sm font-medium text-blue-100 hover:text-white hover:bg-blue-800 transition-colors"
                 >
