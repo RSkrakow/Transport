@@ -64,7 +64,7 @@ const COL = {
   netPln:       7,   // netto (PLN or EUR depending on waluta)
   currency:     8,   // waluta ("EUR" | "PLN")
   euroVal:      17,  // euro — value already in EUR (may be 0 or missing)
-  exchangeRate: 18,  // kurs NBP: PLN→EUR (~4.25) for PLN rows; PLN/100 HUF (~1.19) for HUF rows
+  exchangeRate: 18,  // kurs NBP: PLN/EUR (~4.25) for EUR rows; PLN/100HUF (~1.19) for HUF; PLN/unit for CZK/RON/SEK; 1.0 for PLN
 } as const;
 
 // ── Date helpers ──────────────────────────────────────────────
@@ -194,11 +194,19 @@ export function parseKartotekaXLS(
       const plnPerHuf = kurs > 0 ? kurs / 100 : 0.012;
       const plnAmount = netRaw * plnPerHuf;
       amountEur = plnAmount / plnEurFallback;
+    } else if (currency === "PLN") {
+      // PLN → EUR: kurs = 1.0 dla wpisów PLN (nie jest realnym kursem), zawsze fallback
+      amountEur = netRaw / plnEurFallback;
     } else {
-      // PLN → EUR: kurs is real exchange rate only when > 2 (e.g. 4.25)
-      // When kurs = 1.0 it means no conversion was recorded — use fallback rate
-      const rate = kurs > 2 ? kurs : plnEurFallback;
-      amountEur = netRaw / rate;
+      // CZK, RON, SEK i inne waluty obce:
+      // kurs = PLN za 1 jednostkę waluty (np. 0.1752 PLN/CZK, 0.81 PLN/RON)
+      // netto jest w walucie obcej → netto * kurs = PLN → / plnEurFallback = EUR
+      if (kurs > 0) {
+        amountEur = (netRaw * kurs) / plnEurFallback;
+      } else {
+        warnings.push(`Wiersz ${ri + 1}: ${currency} bez kursu NBP — pominięto`);
+        amountEur = 0;
+      }
     }
 
     if (amountEur <= 0) continue;
