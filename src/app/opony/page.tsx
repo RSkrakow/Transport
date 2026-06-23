@@ -1408,7 +1408,7 @@ export default function OponyPage() {
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <div className="font-semibold text-white text-sm">{naczepReg}</div>
-                        <div className="text-slate-400 text-xs">Naczepa 3-osiowa mega — 12 opon</div>
+                        <div className="text-slate-400 text-xs">Naczepa 3-osiowa mega — 6 opon</div>
                       </div>
                       <div className="flex gap-1.5 text-xs">
                         {nsumm.crit > 0 && <span className="bg-red-700 text-white px-2 py-0.5 rounded-full font-bold">{nsumm.crit}✕</span>}
