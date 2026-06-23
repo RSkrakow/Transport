@@ -17,6 +17,7 @@ import {
   type TirePositionDef,
   type TireStatus,
 } from "@/lib/tireUtils";
+import { BarcodeScanner } from "@/components/BarcodeScanner";
 
 // ── Typy lokalne ──────────────────────────────────────────────
 interface VehicleOption {
@@ -55,6 +56,32 @@ function emptyReadingForm(positions: TirePositionDef[]): ReadingForm {
     };
   });
   return f;
+}
+
+// ── Parsowanie kodu kreskowego opony ─────────────────────────
+function parseTireBarcode(text: string): { brand?: string; size?: string; dot?: string; notes?: string } {
+  const result: { brand?: string; size?: string; dot?: string; notes?: string } = {};
+
+  // Rozmiar: "315/70R22.5", "31570R225", "315/70 R 22.5"
+  const sizeMatch = text.match(/(\d{2,3})[/\\]?(\d{2,3})\s*[Rr]\s*(\d{2}(?:\.\d)?)/);
+  if (sizeMatch) {
+    result.size = `${sizeMatch[1]}/${sizeMatch[2]} R${sizeMatch[3]}`;
+  }
+
+  // DOT: opcjonalnie poprzedzony "DOT"
+  const dotMatch = text.match(/(?:DOT[:\s]*)?([0-5]\d[0-9]\d)(?!\d)/);
+  if (dotMatch) result.dot = dotMatch[1];
+
+  // Znani producenci w tekście
+  const brands = ["Michelin", "Pirelli", "Continental", "Bridgestone", "Goodyear",
+    "Dunlop", "Hankook", "Yokohama", "Toyo", "Fulda", "Semperit", "Sava",
+    "Debica", "Kormoran", "Uniroyal", "Nokian", "Cooper", "Firestone"];
+  for (const b of brands) {
+    if (text.toLowerCase().includes(b.toLowerCase())) { result.brand = b; break; }
+  }
+
+  result.notes = `Kod: ${text}`;
+  return result;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -372,6 +399,21 @@ function TireDetailPanel({
   const [warehouseLoading, setWarehouseLoading] = useState(false);
   const [fromWarehouseId, setFromWarehouseId] = useState<string | null>(null);
 
+  // Skaner kodów kreskowych
+  const [showScanner, setShowScanner] = useState(false);
+
+  function handleBarcodeResult(text: string) {
+    const parsed = parseTireBarcode(text);
+    setForm(f => ({
+      ...f,
+      brand:  parsed.brand  || f.brand,
+      size:   parsed.size   || f.size,
+      dot:    parsed.dot    || f.dot,
+      notes:  parsed.notes  ? (f.notes ? `${f.notes}; ${parsed.notes}` : parsed.notes) : f.notes,
+    }));
+    setShowScanner(false);
+  }
+
   async function loadWarehouse() {
     setWarehouseLoading(true);
     const { data } = await supabase
@@ -566,6 +608,15 @@ function TireDetailPanel({
             </div>
           )}
 
+          {/* Skaner kodów kreskowych */}
+          <button
+            type="button"
+            onClick={() => setShowScanner(true)}
+            className="w-full flex items-center justify-center gap-2 py-1.5 px-3 rounded-lg border border-dashed border-yellow-600/60 text-yellow-400 hover:bg-yellow-700/20 text-xs font-medium transition-colors"
+          >
+            📷 Skanuj kod kreskowy opony (kamera)
+          </button>
+
           <div className="grid grid-cols-2 gap-2">
             {field("Marka *",  "brand",  "text", "np. Michelin")}
             {field("Model",    "model",  "text", "np. X MultiWay")}
@@ -668,6 +719,14 @@ function TireDetailPanel({
           )}
         </div>
       ) : null}
+
+      {/* Skaner kodów kreskowych — pełnoekranowy modal */}
+      {showScanner && (
+        <BarcodeScanner
+          onResult={handleBarcodeResult}
+          onClose={() => setShowScanner(false)}
+        />
+      )}
     </div>
   );
 }
@@ -1056,6 +1115,20 @@ function WarehouseTab() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ brand: "", model: "", size: "", dot: "", condition: "nowa", tread_mm: "", quantity: "1", location: "", price_pln: "", notes: "" });
   const [saving, setSaving] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
+
+  function handleBarcodeResult(text: string) {
+    const parsed = parseTireBarcode(text);
+    setForm(f => ({
+      ...f,
+      brand:  parsed.brand  || f.brand,
+      size:   parsed.size   || f.size,
+      dot:    parsed.dot    || f.dot,
+      notes:  parsed.notes  ? (f.notes ? `${f.notes}; ${parsed.notes}` : parsed.notes) : f.notes,
+    }));
+    setShowScanner(false);
+    setShowAdd(true);
+  }
 
   async function load() {
     setLoading(true);
@@ -1096,10 +1169,19 @@ function WarehouseTab() {
         <div className="text-slate-400 text-sm">
           {items.reduce((s, i) => s + i.quantity, 0)} opon w magazynie
         </div>
-        <button onClick={() => setShowAdd(!showAdd)}
-          className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
-          + Dodaj oponę
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowScanner(true)}
+            className="border border-yellow-600/60 text-yellow-400 hover:bg-yellow-700/20 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+            title="Skanuj kod kreskowy opony"
+          >
+            📷 Skanuj
+          </button>
+          <button onClick={() => setShowAdd(!showAdd)}
+            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
+            + Dodaj oponę
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -1190,6 +1272,14 @@ function WarehouseTab() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Skaner kodów kreskowych magazyn */}
+      {showScanner && (
+        <BarcodeScanner
+          onResult={handleBarcodeResult}
+          onClose={() => setShowScanner(false)}
+        />
       )}
     </div>
   );

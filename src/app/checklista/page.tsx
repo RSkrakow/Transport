@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { SignaturePad } from "@/components/SignaturePad";
 
 // ─── Typy ───────────────────────────────────────────────────────────────────
 type ChecklistType = "initial" | "arrival";
@@ -30,6 +31,8 @@ interface SavedChecklist {
   items: ChecklistItem[];
   overall_status: "complete" | "incomplete";
   notes: string | null;
+  driver_signature: string | null;
+  mechanic_signature: string | null;
 }
 
 // ─── Definicja wyposażenia ───────────────────────────────────────────────────
@@ -111,6 +114,8 @@ export default function ChecklistaPage() {
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [printMode, setPrintMode]     = useState(false);
   const [savedId, setSavedId]         = useState<string | null>(null);
+  const [driverSignature, setDriverSignature]     = useState<string | null>(null);
+  const [mechanicSignature, setMechanicSignature] = useState<string | null>(null);
   const printRef = useRef<HTMLDivElement>(null);
 
   // ── statystyki ──────────────────────────────────────────────────────────
@@ -170,14 +175,16 @@ export default function ChecklistaPage() {
     setSaving(true); setMsg(null);
     try {
       const payload = {
-        vehicle_reg:    vehicleReg.trim().toUpperCase(),
-        checklist_type: type,
-        driver_name:    driverName || null,
-        mechanic_name:  mechanicName || null,
-        km_reading:     kmReading ? parseInt(kmReading) : null,
+        vehicle_reg:       vehicleReg.trim().toUpperCase(),
+        checklist_type:    type,
+        driver_name:       driverName   || null,
+        mechanic_name:     mechanicName || null,
+        km_reading:        kmReading ? parseInt(kmReading) : null,
         items,
-        overall_status: isComplete ? "complete" : "incomplete",
-        notes: notes || null,
+        overall_status:    isComplete ? "complete" : "incomplete",
+        notes:             notes || null,
+        driver_signature:  driverSignature   || null,
+        mechanic_signature: mechanicSignature || null,
       };
       const { data, error } = await supabase
         .from("equipment_checklists")
@@ -218,6 +225,8 @@ export default function ChecklistaPage() {
     setItems(c.items.length ? c.items : initItems());
     setNotes(c.notes ?? "");
     setSavedId(c.id);
+    setDriverSignature(c.driver_signature ?? null);
+    setMechanicSignature(c.mechanic_signature ?? null);
     setMsg(null);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -504,15 +513,55 @@ export default function ChecklistaPage() {
           </div>
         </div>
 
+        {/* ── PODPISY CYFROWE (ekran) ── */}
+        <div className="no-print bg-white border border-slate-200 rounded-xl p-4 mb-6 shadow-sm">
+          <h2 className="text-base font-bold text-slate-700 mb-4">✍️ Podpisy</h2>
+          <p className="text-xs text-slate-400 mb-4">
+            Podpisz palcem lub rysikiem na ekranie telefonu / tabletu. Podpisy zostaną zapisane razem z protokołem.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <SignaturePad
+              label={`Kierowca${driverName ? ` — ${driverName}` : ""}`}
+              onChange={setDriverSignature}
+              initialValue={driverSignature}
+            />
+            <SignaturePad
+              label={`Mechanik / kontrolujący${mechanicName ? ` — ${mechanicName}` : ""}`}
+              onChange={setMechanicSignature}
+              initialValue={mechanicSignature}
+            />
+          </div>
+        </div>
+
         {/* ── PODPISY (druk) ── */}
         <div className="print-only grid grid-cols-3 gap-8 mt-8 pt-6 border-t border-slate-300">
-          {[["Podpis kierowcy", driverName], ["Podpis mechanika", mechanicName], ["Data i pieczęć"]].map(([lbl, val], i) => (
-            <div key={i} className="text-center">
+          {/* Kierowca */}
+          <div className="text-center">
+            {driverSignature ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={driverSignature} alt="Podpis kierowcy" className="h-16 w-full object-contain mb-2" />
+            ) : (
               <div className="h-14 border-b border-slate-400 mb-2" />
-              <div className="text-xs text-slate-600 font-semibold">{lbl}</div>
-              {val && <div className="text-xs text-slate-400">{val}</div>}
-            </div>
-          ))}
+            )}
+            <div className="text-xs text-slate-600 font-semibold">Podpis kierowcy</div>
+            {driverName && <div className="text-xs text-slate-400">{driverName}</div>}
+          </div>
+          {/* Mechanik */}
+          <div className="text-center">
+            {mechanicSignature ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={mechanicSignature} alt="Podpis mechanika" className="h-16 w-full object-contain mb-2" />
+            ) : (
+              <div className="h-14 border-b border-slate-400 mb-2" />
+            )}
+            <div className="text-xs text-slate-600 font-semibold">Podpis mechanika</div>
+            {mechanicName && <div className="text-xs text-slate-400">{mechanicName}</div>}
+          </div>
+          {/* Data i pieczęć */}
+          <div className="text-center">
+            <div className="h-14 border-b border-slate-400 mb-2" />
+            <div className="text-xs text-slate-600 font-semibold">Data i pieczęć</div>
+          </div>
         </div>
 
         {/* ── PRZYCISKI AKCJI ── */}
