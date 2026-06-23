@@ -43,7 +43,7 @@ export default function NavBar() {
     setMode(stored);
   }, []);
 
-  // Nasłuchuj zmian localStorage (np. po powrocie na ekran główny)
+  // Nasłuchuj zmian localStorage (np. inny tab)
   useEffect(() => {
     function onStorage(e: StorageEvent) {
       if (e.key === "hbm_mode") {
@@ -53,6 +53,14 @@ export default function NavBar() {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  // Re-odczytaj tryb po nawigacji z ekranu powitalnego (fix: świeża sesja)
+  useEffect(() => {
+    if (pathname && pathname !== "/") {
+      const stored = localStorage.getItem("hbm_mode") as Mode | null;
+      setMode(stored);
+    }
+  }, [pathname]);
 
   // Nie renderuj nav na ekranie powitalnym "/"
   if (!mounted || pathname === "/") return null;

@@ -409,8 +409,22 @@ export default function ChecklistaPage() {
                       {/* Nazwa */}
                       <span className="flex-1 text-sm text-slate-800 min-w-0">{item.name}</span>
 
-                      {/* Ilość */}
-                      <span className="text-xs font-semibold text-slate-500 w-16 text-center shrink-0">
+                      {/* Ilość — edytowalna */}
+                      <input
+                        className="no-print w-16 border border-slate-200 rounded px-1 py-0.5 text-xs
+                                   font-semibold text-slate-600 text-center shrink-0
+                                   focus:outline-none focus:ring-1 focus:ring-[#1F3864]"
+                        value={item.requiredQty}
+                        title="Edytuj ilość"
+                        onChange={(e) =>
+                          setItems((prev) =>
+                            prev.map((it) =>
+                              it.id !== item.id ? it : { ...it, requiredQty: e.target.value }
+                            )
+                          )
+                        }
+                      />
+                      <span className="print-only text-xs font-semibold text-slate-500 w-16 text-center shrink-0">
                         {item.requiredQty}
                       </span>
 

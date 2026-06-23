@@ -366,6 +366,36 @@ function TireDetailPanel({
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
+  // Magazyn — wybór opony do przypisania
+  const [showWarehouse, setShowWarehouse] = useState(false);
+  const [warehouseItems, setWarehouseItems] = useState<TireWarehouseItem[]>([]);
+  const [warehouseLoading, setWarehouseLoading] = useState(false);
+  const [fromWarehouseId, setFromWarehouseId] = useState<string | null>(null);
+
+  async function loadWarehouse() {
+    setWarehouseLoading(true);
+    const { data } = await supabase
+      .from("tire_warehouse")
+      .select("*")
+      .gt("quantity", 0)
+      .order("brand");
+    setWarehouseItems(data ?? []);
+    setWarehouseLoading(false);
+    setShowWarehouse(true);
+  }
+
+  function pickFromWarehouse(w: TireWarehouseItem) {
+    setForm((f) => ({
+      ...f,
+      brand: w.brand,
+      model: w.model ?? "",
+      size: w.size,
+      dot: w.dot ?? "",
+    }));
+    setFromWarehouseId(w.id);
+    setShowWarehouse(false);
+  }
+
   // Wypełnij formularz istniejącymi danymi przy edycji
   useEffect(() => {
     if (tire) {
@@ -383,7 +413,12 @@ function TireDetailPanel({
   }, [tire]);
 
   // Reset trybu edycji gdy zmienia się pozycja
-  useEffect(() => { setEditMode(!tire); setMsg(null); }, [positionId, vehicleReg]);
+  useEffect(() => {
+    setEditMode(!tire);
+    setMsg(null);
+    setShowWarehouse(false);
+    setFromWarehouseId(null);
+  }, [positionId, vehicleReg]);
 
   async function handleSaveTire() {
     if (!form.brand || !form.size) { setMsg("Marka i rozmiar są wymagane"); return; }
@@ -406,6 +441,23 @@ function TireDetailPanel({
         .from("tires")
         .upsert(payload, { onConflict: "vehicle_reg,position" });
       if (error) throw error;
+
+      // Jeśli opona pochodzi z magazynu — zmniejsz ilość
+      if (fromWarehouseId) {
+        const warehouseItem = warehouseItems.find((w) => w.id === fromWarehouseId);
+        if (warehouseItem) {
+          if (warehouseItem.quantity <= 1) {
+            await supabase.from("tire_warehouse").delete().eq("id", fromWarehouseId);
+          } else {
+            await supabase
+              .from("tire_warehouse")
+              .update({ quantity: warehouseItem.quantity - 1 })
+              .eq("id", fromWarehouseId);
+          }
+          setFromWarehouseId(null);
+        }
+      }
+
       setMsg("✓ Zapisano");
       setEditMode(false);
       onReload();
@@ -465,6 +517,55 @@ function TireDetailPanel({
           <div className="text-slate-300 text-xs font-semibold uppercase tracking-wide mb-1">
             {tire ? "Edytuj dane opony" : "Przypisz oponę do pozycji"}
           </div>
+
+          {/* ── Przypisz z magazynu (tylko gdy brak opony) ── */}
+          {!tire && (
+            <div className="mb-2">
+              <div className="flex items-center gap-2 mb-1">
+                <button
+                  onClick={loadWarehouse}
+                  disabled={warehouseLoading}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-blue-500 text-blue-400 hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-colors disabled:opacity-50"
+                >
+                  📦 {warehouseLoading ? "Ładuję..." : "Wybierz z magazynu"}
+                </button>
+                {fromWarehouseId && (
+                  <span className="text-xs text-green-400 font-medium">✓ Dane z magazynu</span>
+                )}
+              </div>
+              {showWarehouse && (
+                <div className="bg-slate-900 border border-slate-600 rounded-lg overflow-hidden mb-2 max-h-44 overflow-y-auto">
+                  <div className="sticky top-0 bg-slate-900 text-xs text-slate-400 px-2 py-1.5 border-b border-slate-700 font-semibold flex justify-between">
+                    <span>Magazyn opon</span>
+                    <button onClick={() => setShowWarehouse(false)} className="text-slate-500 hover:text-white">✕</button>
+                  </div>
+                  {warehouseItems.length === 0 ? (
+                    <div className="text-xs text-slate-500 text-center py-3">Magazyn pusty</div>
+                  ) : (
+                    warehouseItems.map((w) => (
+                      <button
+                        key={w.id}
+                        onClick={() => pickFromWarehouse(w)}
+                        className="w-full text-left px-3 py-2 hover:bg-slate-700 border-b border-slate-800 last:border-0 transition-colors"
+                      >
+                        <div className="text-white text-xs font-medium">
+                          {w.brand}{w.model ? ` ${w.model}` : ""}
+                        </div>
+                        <div className="text-slate-400 text-xs">
+                          {w.size}
+                          {w.dot ? ` · DOT ${w.dot}` : ""}
+                          {" · "}{w.condition}
+                          {w.tread_mm != null ? ` · ${w.tread_mm} mm` : ""}
+                          {" · "}<span className="text-slate-300 font-medium">{w.quantity} szt.</span>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-2">
             {field("Marka *",  "brand",  "text", "np. Michelin")}
             {field("Model",    "model",  "text", "np. X MultiWay")}

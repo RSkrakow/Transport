@@ -1,7 +1,7 @@
 // ============================================================
 // tireUtils.ts — HBM TruckCalc
 // Definicje pozycji opon, kalkulacja statusu, parsowanie DOT
-// Ciągnik 4×2 (6 opon) + Naczepa 3-osiowa mega (12 opon)
+// Ciągnik 4×2 (6 opon) + Naczepa 3-osiowa mega (6 opon — 1 opona na stronę)
 // ============================================================
 
 export type TireStatus = "ok" | "warning" | "critical" | "no-data";
@@ -95,27 +95,21 @@ export const CIAGNIK_POSITIONS: TirePositionDef[] = [
   { id: "2PZ", label: "2PZ", axle: 2, side: "P", twin: "Z",  isTwin: true,  svgX: 270, svgY: 393, tireW: 24, tireH: 68 },
 ];
 
-// ── Naczepa 3-osiowa mega — 12 opon ──────────────────────────
-// 3 osie × 4 bliźniaki (LZ, LW, PW, PZ)
+// ── Naczepa 3-osiowa mega — 6 opon ───────────────────────────
+// 3 osie × 1 opona na stronę (L i P) — naczepa nie ma bliźniaków
 // Prefiks "N" w id odróżnia od opon ciągnika w bazie
 //
 // SVG viewBox: "0 0 300 490"  (przód = góra)
 export const NACZEPA_POSITIONS: TirePositionDef[] = [
   // Oś 1
-  { id: "N1LZ", label: "1LZ", axle: 1, side: "L", twin: "Z", isTwin: true, svgX: 6,   svgY: 228, tireW: 24, tireH: 68 },
-  { id: "N1LW", label: "1LW", axle: 1, side: "L", twin: "W", isTwin: true, svgX: 34,  svgY: 228, tireW: 24, tireH: 68 },
-  { id: "N1PW", label: "1PW", axle: 1, side: "P", twin: "W", isTwin: true, svgX: 242, svgY: 228, tireW: 24, tireH: 68 },
-  { id: "N1PZ", label: "1PZ", axle: 1, side: "P", twin: "Z", isTwin: true, svgX: 270, svgY: 228, tireW: 24, tireH: 68 },
+  { id: "N1L", label: "1L", axle: 1, side: "L", twin: null, isTwin: false, svgX: 8,   svgY: 228, tireW: 30, tireH: 68 },
+  { id: "N1P", label: "1P", axle: 1, side: "P", twin: null, isTwin: false, svgX: 262, svgY: 228, tireW: 30, tireH: 68 },
   // Oś 2
-  { id: "N2LZ", label: "2LZ", axle: 2, side: "L", twin: "Z", isTwin: true, svgX: 6,   svgY: 313, tireW: 24, tireH: 68 },
-  { id: "N2LW", label: "2LW", axle: 2, side: "L", twin: "W", isTwin: true, svgX: 34,  svgY: 313, tireW: 24, tireH: 68 },
-  { id: "N2PW", label: "2PW", axle: 2, side: "P", twin: "W", isTwin: true, svgX: 242, svgY: 313, tireW: 24, tireH: 68 },
-  { id: "N2PZ", label: "2PZ", axle: 2, side: "P", twin: "Z", isTwin: true, svgX: 270, svgY: 313, tireW: 24, tireH: 68 },
+  { id: "N2L", label: "2L", axle: 2, side: "L", twin: null, isTwin: false, svgX: 8,   svgY: 313, tireW: 30, tireH: 68 },
+  { id: "N2P", label: "2P", axle: 2, side: "P", twin: null, isTwin: false, svgX: 262, svgY: 313, tireW: 30, tireH: 68 },
   // Oś 3
-  { id: "N3LZ", label: "3LZ", axle: 3, side: "L", twin: "Z", isTwin: true, svgX: 6,   svgY: 398, tireW: 24, tireH: 68 },
-  { id: "N3LW", label: "3LW", axle: 3, side: "L", twin: "W", isTwin: true, svgX: 34,  svgY: 398, tireW: 24, tireH: 68 },
-  { id: "N3PW", label: "3PW", axle: 3, side: "P", twin: "W", isTwin: true, svgX: 242, svgY: 398, tireW: 24, tireH: 68 },
-  { id: "N3PZ", label: "3PZ", axle: 3, side: "P", twin: "Z", isTwin: true, svgX: 270, svgY: 398, tireW: 24, tireH: 68 },
+  { id: "N3L", label: "3L", axle: 3, side: "L", twin: null, isTwin: false, svgX: 8,   svgY: 398, tireW: 30, tireH: 68 },
+  { id: "N3P", label: "3P", axle: 3, side: "P", twin: null, isTwin: false, svgX: 262, svgY: 398, tireW: 30, tireH: 68 },
 ];
 
 // ── Progi statusu ─────────────────────────────────────────────
