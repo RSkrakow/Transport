@@ -82,11 +82,14 @@ async function reverseGeocode(lat: number, lon: number): Promise<string | null> 
 }
 
 // ─── ORS HGV routing with country breakdown ──────────────────
+// waypoints: [from, ...via, to] — minimum 2 points
 export async function calculateRoute(
-  from: GeoPoint,
-  to: GeoPoint,
+  waypoints: GeoPoint[],
   apiKey: string
 ): Promise<RouteResult> {
+  const from = waypoints[0];
+  const to   = waypoints[waypoints.length - 1];
+
   // /geojson suffix returns GeoJSON geometry (coordinates as [[lon,lat], ...])
   // Pass key both as header AND query param for maximum compatibility
   const orsUrl = new URL("https://api.openrouteservice.org/v2/directions/driving-hgv/geojson");
@@ -94,10 +97,7 @@ export async function calculateRoute(
   const url = orsUrl.toString();
 
   const body = {
-    coordinates: [
-      [from.lon, from.lat],
-      [to.lon,   to.lat],
-    ],
+    coordinates: waypoints.map(p => [p.lon, p.lat]),
     extra_info: ["countryinfo"],
     units: "km",
     instructions: false,
@@ -204,16 +204,20 @@ export async function calculateRoute(
 }
 
 // ─── Fallback: straight-line × 1.3 if ORS unavailable ────────
+// Sums pairwise distances for multi-waypoint routes
 function fallbackEstimate(from: GeoPoint, to: GeoPoint, error: string): RouteResult {
   const R = 6371;
-  const dLat = ((to.lat - from.lat) * Math.PI) / 180;
-  const dLon = ((to.lon - from.lon) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((from.lat * Math.PI) / 180) *
-      Math.cos((to.lat * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  const straightKm = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  function haversineKm(a: GeoPoint, b: GeoPoint) {
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLon = ((b.lon - a.lon) * Math.PI) / 180;
+    const h =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((a.lat * Math.PI) / 180) *
+        Math.cos((b.lat * Math.PI) / 180) *
+        Math.sin(dLon / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  }
+  const straightKm = haversineKm(from, to);
   const distanceKm = Math.round(straightKm * 1.3 * 10) / 10;
 
   return {

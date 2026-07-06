@@ -12,6 +12,7 @@ interface CountrySegment {
 
 interface RouteResult {
   from: string;
+  via?: string | null;
   to: string;
   distanceKm: number;
   durationH: number;
@@ -35,10 +36,17 @@ const FLAG: Record<string, string> = {
 
 export default function RouteFinderPanel({ onRouteCalculated }: Props) {
   const [from, setFrom] = useState("");
+  const [via,  setVia]  = useState("");
   const [to, setTo]     = useState("");
-  const [loading, setLoading] = useState(false);
-  const [result, setResult]   = useState<RouteResult | null>(null);
-  const [error, setError]     = useState<string | null>(null);
+  const [showVia, setShowVia]   = useState(false);
+  const [loading, setLoading]   = useState(false);
+  const [result, setResult]     = useState<RouteResult | null>(null);
+  const [error, setError]       = useState<string | null>(null);
+
+  function toggleVia() {
+    setShowVia(v => !v);
+    if (showVia) setVia(""); // clear when hiding
+  }
 
   async function handleCalculate() {
     if (!from.trim() || !to.trim()) return;
@@ -50,7 +58,11 @@ export default function RouteFinderPanel({ onRouteCalculated }: Props) {
       const res = await fetch("/api/route", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ from: from.trim(), to: to.trim() }),
+        body: JSON.stringify({
+          from: from.trim(),
+          to:   to.trim(),
+          ...(showVia && via.trim() ? { via: via.trim() } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -90,28 +102,63 @@ export default function RouteFinderPanel({ onRouteCalculated }: Props) {
       </div>
 
       {/* Inputs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="label">Miasto wyjazdu</label>
-          <input
-            type="text"
-            className="input-field"
-            placeholder="np. Warszawa, Wrocław, Katowice"
-            value={from}
-            onChange={e => setFrom(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
+      <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="label">Miasto wyjazdu</label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="np. Warszawa, Wrocław, Katowice"
+              value={from}
+              onChange={e => setFrom(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
+          <div>
+            <label className="label">Miasto docelowe</label>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="np. Hamburg, Milano, Lyon"
+              value={to}
+              onChange={e => setTo(e.target.value)}
+              onKeyDown={handleKeyDown}
+            />
+          </div>
         </div>
+
+        {/* Waypoint toggle + field */}
         <div>
-          <label className="label">Miasto docelowe</label>
-          <input
-            type="text"
-            className="input-field"
-            placeholder="np. Hamburg, Milano, Lyon"
-            value={to}
-            onChange={e => setTo(e.target.value)}
-            onKeyDown={handleKeyDown}
-          />
+          <button
+            type="button"
+            onClick={toggleVia}
+            className={`text-xs flex items-center gap-1 transition-colors ${
+              showVia
+                ? "text-red-500 hover:text-red-700"
+                : "text-blue-600 hover:text-blue-800"
+            }`}
+          >
+            {showVia ? (
+              <><span className="font-bold text-sm leading-none">✕</span> Usuń punkt pośredni</>
+            ) : (
+              <><span className="font-bold text-sm leading-none">+</span> Dodaj punkt pośredni</>
+            )}
+          </button>
+          {showVia && (
+            <div className="mt-2">
+              <label className="label">Punkt pośredni</label>
+              <input
+                type="text"
+                className="input-field"
+                placeholder="np. Poznań, Monachium, Lyon"
+                value={via}
+                onChange={e => setVia(e.target.value)}
+                onKeyDown={handleKeyDown}
+                autoFocus
+              />
+            </div>
+          )}
         </div>
       </div>
 
@@ -146,7 +193,11 @@ export default function RouteFinderPanel({ onRouteCalculated }: Props) {
           }`}>
             <div>
               <p className="text-sm font-semibold text-slate-700">
-                {result.from} → {result.to}
+                {result.from}
+                {result.via && (
+                  <span className="text-blue-600"> → {result.via}</span>
+                )}
+                {" → "}{result.to}
               </p>
               <p className="text-xs text-slate-500 mt-0.5">
                 {hasOrs
