@@ -149,13 +149,20 @@ function parseTmsRevenue(
       if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik") || s.includes("ciagnik")) && vehicleCol === -1) vehicleCol = i;
       // Prefer "km ład" (loaded km); avoid picking "puste" (empty run km)
       if (distCol === -1 && (s.includes("km ład") || s === "km" || s.includes("km wg"))) distCol = i;
-      if (dateCol === -1 && (s.includes("data utw") || s.includes("data zał") || s.includes("data wyjazd") || s.includes("data załadun"))) dateCol = i;
     });
-    // Fallback date: any "data" col if not found above
-    if (dateCol === -1) {
+    // Date priority: 1) "Dostarczenie rzeczywiste" (actual delivery), 2) "Dostarczenie" (planned delivery),
+    // 3) other date columns, 4) any "data" fallback
+    const datePriority = [
+      (s: string) => s === "dostarczenie rzeczywiste" || s.includes("dostarcz") && s.includes("rzeczyw"),
+      (s: string) => s === "dostarczenie",
+      (s: string) => s.includes("data utw") || s.includes("data zał") || s.includes("data wyjazd") || s.includes("data załadun"),
+      (s: string) => s.includes("data"),
+    ];
+    for (const test of datePriority) {
+      if (dateCol !== -1) break;
       row.forEach((v, i) => {
         if (dateCol !== -1) return;
-        if (String(v ?? "").toLowerCase().includes("data")) dateCol = i;
+        if (test(String(v ?? "").toLowerCase())) dateCol = i;
       });
     }
     break;
