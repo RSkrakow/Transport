@@ -233,8 +233,8 @@ function parseTmsRevenue(
       if (rowMonth) months.add(rowMonth);
     }
 
-    // Skip if filter active and row doesn't match
-    if (filterMonth && rowMonth && rowMonth !== filterMonth) continue;
+    // Skip if filter active and row doesn't match OR date unparseable (subtotal rows etc.)
+    if (filterMonth && (!rowMonth || rowMonth !== filterMonth)) continue;
 
     if (fracht > 0) {
       revenue += fracht;
