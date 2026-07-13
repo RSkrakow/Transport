@@ -92,16 +92,17 @@ function parseTmsRevenue(
   let headerRow = -1;
 
   // Priority keywords for fracht column (most specific first)
-  // "Fracht z walutą *" is the standard Rejestr Transportów column name
-  const FRACHT_KEYS = ["fracht z walutą", "kwota frachtu", "fracht eur", "wartość frachtu",
-                       "fracht netto", "stawka fracht", "kwota eur", "kwota euro", "przychód", "fracht"];
+  // "Fracht EUR netto" is preferred — already converted to EUR, no currency parsing needed
+  // "Fracht z walutą *" is fallback — may contain PLN/EUR mixed strings
+  const FRACHT_KEYS = ["fracht eur netto", "fracht eur", "fracht netto", "fracht z walutą",
+                       "kwota frachtu", "wartość frachtu", "stawka fracht",
+                       "kwota eur", "kwota euro", "przychód", "fracht"];
 
   // Header row detection: must contain column-level keywords, NOT just title-row words like "zleceniodawca"
-  // A valid header row has "fracht" from "Fracht z walutą *", or "ciągnik", or "nr pełny", etc.
-  // We avoid matching "zleceni" alone (matches "Dane zlecenia" title rows).
   const isHeaderRow = (row: unknown[]) => {
     const joined = row.map((v) => String(v ?? "").toLowerCase()).join("|");
     return (
+      joined.includes("fracht eur netto") ||
       joined.includes("fracht z walutą") ||
       joined.includes("fracht eur") ||
       joined.includes("kwota frachtu") ||
