@@ -197,7 +197,7 @@ function parseTmsRevenue(
 
   // Try to detect label from date column values
   const months = new Set<string>();
-
+  let lastSeenMonth = "";
   for (let r = headerRow + 1; r < rows.length; r++) {
     const row = rows[r] as unknown[];
     if (!row || row.every((v) => v == null || v === "")) continue;
@@ -228,20 +228,34 @@ function parseTmsRevenue(
     if (dateCol >= 0 && row[dateCol]) {
       const ds = String(row[dateCol]).trim();
       const n = parseFloat(ds);
-      if (!isNaN(n) && n > 40000) {
+      // Ensure it's not parsing purely a year like "2026-06" as n=2026
+      if (!isNaN(n) && n > 40000 && String(n) === ds) {
         const d = new Date((n - 25569) * 86400 * 1000);
         rowMonth = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
       } else {
         const m = ds.match(/(\d{4})[.\-/](\d{2})/);
-        if (m) rowMonth = `${m[1]}-${m[2]}`;
-        const m2 = ds.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/);
-        if (m2) rowMonth = `${m2[3]}-${m2[2]}`;
+        if (m) {
+          rowMonth = `${m[1]}-${m[2]}`;
+        } else {
+          const m2 = ds.match(/(\d{2})[.\-/](\d{2})[.\-/](\d{4})/);
+          if (m2) {
+            rowMonth = `${m2[3]}-${m2[2]}`;
+          } else {
+            const m3 = ds.match(/(\d{2})[.\-/](\d{4})/);
+            if (m3) rowMonth = `${m3[2]}-${m3[1]}`;
+          }
+        }
       }
-      if (rowMonth) months.add(rowMonth);
+      if (rowMonth) {
+        months.add(rowMonth);
+        lastSeenMonth = rowMonth;
+      }
     }
 
+    const effectiveMonth = rowMonth || lastSeenMonth;
+
     // Skip if filter active and row doesn't match
-    if (filterMonth && rowMonth && rowMonth !== filterMonth) continue;
+    if (filterMonth && effectiveMonth && effectiveMonth !== filterMonth) continue;
 
     if (fracht > 0) {
       revenue += fracht;
