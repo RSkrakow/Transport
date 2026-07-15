@@ -28,6 +28,7 @@ interface SavedChecklist {
   driver_name: string | null;
   mechanic_name: string | null;
   km_reading: number | null;
+  vehicle_condition: string | null;
   items: ChecklistItem[];
   overall_status: "complete" | "incomplete";
   notes: string | null;
@@ -99,6 +100,7 @@ export default function ChecklistaPage() {
   const [driverName, setDriverName]   = useState("");
   const [mechanicName, setMechanicName] = useState("");
   const [kmReading, setKmReading]     = useState("");
+  const [vehicleCondition, setVehicleCondition] = useState("");
   const [checkDate, setCheckDate]     = useState(todayStr());
   const [items, setItems]             = useState<ChecklistItem[]>(initItems());
   const [notes, setNotes]             = useState("");
@@ -174,6 +176,7 @@ export default function ChecklistaPage() {
         driver_name:       driverName   || null,
         mechanic_name:     mechanicName || null,
         km_reading:        kmReading ? parseInt(kmReading) : null,
+        vehicle_condition: vehicleCondition || null,
         items,
         overall_status:    isComplete ? "complete" : "incomplete",
         notes:             notes || null,
@@ -215,6 +218,7 @@ export default function ChecklistaPage() {
     setDriverName(c.driver_name ?? "");
     setMechanicName(c.mechanic_name ?? "");
     setKmReading(c.km_reading?.toString() ?? "");
+    setVehicleCondition(c.vehicle_condition ?? "");
     setCheckDate(c.created_at.slice(0, 10));
     setItems(c.items.length ? c.items : initItems());
     setNotes(c.notes ?? "");
@@ -363,6 +367,17 @@ export default function ChecklistaPage() {
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Opcjonalne uwagi..."
+              />
+            </div>
+            <div className="col-span-2 md:col-span-3">
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Stan pojazdu (zarysowania, uszkodzenia itp.)</label>
+              <textarea
+                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm
+                           focus:outline-none focus:ring-2 focus:ring-[#1F3864]"
+                rows={2}
+                value={vehicleCondition}
+                onChange={(e) => setVehicleCondition(e.target.value)}
+                placeholder="np. zarysowany zderzak przód, prawe lusterko pęknięte..."
               />
             </div>
           </div>
@@ -576,7 +591,7 @@ export default function ChecklistaPage() {
             🖨️ Generuj dokument / Drukuj
           </button>
           <button
-            onClick={() => { setItems(initItems()); setMsg(null); setSavedId(null); }}
+            onClick={() => { setItems(initItems()); setMsg(null); setSavedId(null); setVehicleCondition(""); }}
             className="px-4 py-2.5 bg-white text-slate-500 border border-slate-300 rounded-lg text-sm hover:bg-slate-50"
           >
             ↺ Nowa checklista
