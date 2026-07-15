@@ -202,6 +202,13 @@ function parseTmsRevenue(
     const row = rows[r] as unknown[];
     if (!row || row.every((v) => v == null || v === "")) continue;
 
+    // Ignore summary rows to prevent double-counting
+    const isSummary = row.some(v => {
+      const str = String(v ?? "").toLowerCase().trim();
+      return str.includes("podsumowanie") || str === "razem" || str === "suma" || str === "ogółem" || str.startsWith("razem:") || str.startsWith("suma:");
+    });
+    if (isSummary) continue;
+
     // Parse fracht
     let fracht = 0;
     if (frachtCol >= 0) {
