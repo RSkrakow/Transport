@@ -791,6 +791,8 @@ function InspectionForm({
 
   async function handleSave() {
     if (!vehicleReg) { setMsg("Wybierz pojazd"); return; }
+    if (!inspectorName.trim()) { setMsg("Podaj osobę wykonującą przegląd"); return; }
+    if (!odometerKm) { setMsg("Podaj stan licznika"); return; }
     setSaving(true); setMsg(null);
     try {
       const { data: insp, error: e1 } = await supabase
@@ -864,13 +866,13 @@ function InspectionForm({
             className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white" />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Inspektor</label>
+          <label className="block text-xs text-slate-400 mb-1">Inspektor *</label>
           <input type="text" value={inspectorName} onChange={e => setInspectorName(e.target.value)}
             placeholder="Imię i nazwisko"
             className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />
         </div>
         <div>
-          <label className="block text-xs text-slate-400 mb-1">Stan km</label>
+          <label className="block text-xs text-slate-400 mb-1">Stan km *</label>
           <input type="number" value={odometerKm} onChange={e => setOdometerKm(e.target.value)}
             placeholder="np. 450000"
             className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2 text-sm text-white placeholder-slate-500" />

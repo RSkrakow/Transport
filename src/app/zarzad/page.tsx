@@ -92,17 +92,16 @@ function parseTmsRevenue(
   let headerRow = -1;
 
   // Priority keywords for fracht column (most specific first)
-  // "Fracht EUR netto" is preferred — already converted to EUR, no currency parsing needed
-  // "Fracht z walutą *" is fallback — may contain PLN/EUR mixed strings
-  const FRACHT_KEYS = ["fracht eur netto", "fracht eur", "fracht netto", "fracht z walutą",
-                       "kwota frachtu", "wartość frachtu", "stawka fracht",
-                       "kwota eur", "kwota euro", "przychód", "fracht"];
+  // "Fracht z walutą *" is the standard Rejestr Transportów column name
+  const FRACHT_KEYS = ["fracht z walutą", "kwota frachtu", "fracht eur", "wartość frachtu",
+                       "fracht netto", "stawka fracht", "kwota eur", "kwota euro", "przychód", "fracht"];
 
   // Header row detection: must contain column-level keywords, NOT just title-row words like "zleceniodawca"
+  // A valid header row has "fracht" from "Fracht z walutą *", or "ciągnik", or "nr pełny", etc.
+  // We avoid matching "zleceni" alone (matches "Dane zlecenia" title rows).
   const isHeaderRow = (row: unknown[]) => {
     const joined = row.map((v) => String(v ?? "").toLowerCase()).join("|");
     return (
-      joined.includes("fracht eur netto") ||
       joined.includes("fracht z walutą") ||
       joined.includes("fracht eur") ||
       joined.includes("kwota frachtu") ||
@@ -149,20 +148,13 @@ function parseTmsRevenue(
       if ((s.includes("pojazd") || s.includes("nr rej") || s.includes("ciągnik") || s.includes("ciagnik")) && vehicleCol === -1) vehicleCol = i;
       // Prefer "km ład" (loaded km); avoid picking "puste" (empty run km)
       if (distCol === -1 && (s.includes("km ład") || s === "km" || s.includes("km wg"))) distCol = i;
+      if (dateCol === -1 && (s.includes("data utw") || s.includes("data zał") || s.includes("data wyjazd") || s.includes("data załadun"))) dateCol = i;
     });
-    // Date priority: 1) "Dostarczenie rzeczywiste" (actual delivery), 2) "Dostarczenie" (planned delivery),
-    // 3) other date columns, 4) any "data" fallback
-    const datePriority = [
-      (s: string) => s === "dostarczenie rzeczywiste" || s.includes("dostarcz") && s.includes("rzeczyw"),
-      (s: string) => s === "dostarczenie",
-      (s: string) => s.includes("data utw") || s.includes("data zał") || s.includes("data wyjazd") || s.includes("data załadun"),
-      (s: string) => s.includes("data"),
-    ];
-    for (const test of datePriority) {
-      if (dateCol !== -1) break;
+    // Fallback date: any "data" col if not found above
+    if (dateCol === -1) {
       row.forEach((v, i) => {
         if (dateCol !== -1) return;
-        if (test(String(v ?? "").toLowerCase())) dateCol = i;
+        if (String(v ?? "").toLowerCase().includes("data")) dateCol = i;
       });
     }
     break;
@@ -240,8 +232,8 @@ function parseTmsRevenue(
       if (rowMonth) months.add(rowMonth);
     }
 
-    // Skip if filter active and row doesn't match OR date unparseable (subtotal rows etc.)
-    if (filterMonth && (!rowMonth || rowMonth !== filterMonth)) continue;
+    // Skip if filter active and row doesn't match
+    if (filterMonth && rowMonth && rowMonth !== filterMonth) continue;
 
     if (fracht > 0) {
       revenue += fracht;

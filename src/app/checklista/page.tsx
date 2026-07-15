@@ -37,37 +37,31 @@ interface SavedChecklist {
 
 // ─── Definicja wyposażenia ───────────────────────────────────────────────────
 const EQUIPMENT: EquipmentItem[] = [
-  // Zabezpieczenie ładunku
-  { id: "pasy_6m",      category: "Zabezpieczenie ładunku", name: "Pasy spinające 6 m (LC 2500 daN)",        requiredQty: "8 szt." },
-  { id: "pasy_3m",      category: "Zabezpieczenie ładunku", name: "Pasy spinające 3 m (LC 2500 daN)",        requiredQty: "4 szt." },
-  { id: "pasy_8m",      category: "Zabezpieczenie ładunku", name: "Pasy spinające 8 m (LC 5000 daN)",        requiredQty: "2 szt." },
-  { id: "belki",        category: "Zabezpieczenie ładunku", name: "Belki rozporowe aluminiowe (naczepa)",    requiredQty: "6 szt." },
-  { id: "narozniki_pl", category: "Zabezpieczenie ładunku", name: "Narożniki ochronne plastikowe",           requiredQty: "20 szt." },
-  { id: "maty",         category: "Zabezpieczenie ładunku", name: "Maty antypoślizgowe pod ładunek",         requiredQty: "4 szt." },
-  { id: "haki",         category: "Zabezpieczenie ładunku", name: "Haki załadunkowe (do szyn naczepy)",      requiredQty: "8 szt." },
-  // BHP / obowiązkowe
-  { id: "gasnica_2",    category: "Wyposażenie obowiązkowe — BHP", name: "Gaśnica proszkowa 2 kg (ważna)",  requiredQty: "1 szt." },
-  { id: "gasnica_6",    category: "Wyposażenie obowiązkowe — BHP", name: "Gaśnica 6 kg — ciągnik (ADR)",    requiredQty: "1 szt." },
-  { id: "apteczka",     category: "Wyposażenie obowiązkowe — BHP", name: "Apteczka pierwszej pomocy",        requiredQty: "1 kpl." },
-  { id: "trojkat",      category: "Wyposażenie obowiązkowe — BHP", name: "Trójkąt ostrzegawczy odblaskowy", requiredQty: "2 szt." },
-  { id: "kamizelka",    category: "Wyposażenie obowiązkowe — BHP", name: "Kamizelka odblaskowa EN471",       requiredQty: "3 szt." },
-  { id: "latarka",      category: "Wyposażenie obowiązkowe — BHP", name: "Latarka z zapasowymi bateriami",   requiredQty: "1 kpl." },
-  { id: "rekawice",     category: "Wyposażenie obowiązkowe — BHP", name: "Rękawice ochronne",                requiredQty: "1 para" },
-  // Narzędzia
-  { id: "kliny",        category: "Narzędzia i akcesoria", name: "Kliny pod koła (gumowe/stalowe)",          requiredQty: "2 szt." },
-  { id: "drabinka",     category: "Narzędzia i akcesoria", name: "Drabinka inspekcyjna",                      requiredQty: "1 szt." },
-  { id: "klucz_kol",   category: "Narzędzia i akcesoria", name: "Klucz do kół (krzyżak + nasadki)",          requiredQty: "1 kpl." },
-  { id: "lewarek",      category: "Narzędzia i akcesoria", name: "Lewarek hydrauliczny 20 t",                 requiredQty: "1 szt." },
-  { id: "lancuchy",     category: "Narzędzia i akcesoria", name: "Łańcuchy śnieżne (rozmiar naczepy)",        requiredQty: "2 szt." },
-  { id: "mlot_opon",   category: "Narzędzia i akcesoria", name: "Młotek do opon",                            requiredQty: "1 szt." },
-  { id: "miernik",      category: "Narzędzia i akcesoria", name: "Miernik ciśnienia opon",                    requiredQty: "1 szt." },
-  { id: "lina",         category: "Narzędzia i akcesoria", name: "Lina holownicza 5 t",                       requiredQty: "1 szt." },
-  { id: "kable",        category: "Narzędzia i akcesoria", name: "Kable rozruchowe 600 A",                    requiredQty: "1 kpl." },
-  // Dokumentacja
-  { id: "dokumenty",   category: "Dokumentacja i inne", name: "Dokumenty pojazdu (dowód rej., OC, przeg.)", requiredQty: "1 kpl." },
-  { id: "plomby",       category: "Dokumentacja i inne", name: "Plomby do naczepy / TIR (zapas)",            requiredQty: "10 szt." },
-  { id: "folie",        category: "Dokumentacja i inne", name: "Folie stretch / taśmy do zabezp. palet",     requiredQty: "2 szt." },
-  { id: "czyściwo",    category: "Dokumentacja i inne", name: "Czyściwo / szmaty techniczne",                requiredQty: "1 kpl." },
+  // Asortyment ciągnik
+  { id: "c_klucze_kola", category: "Asortyment ciągnik", name: "Zestaw kluczy do odkręcania kół", requiredQty: "1 szt." },
+  { id: "c_lewarek", category: "Asortyment ciągnik", name: "Lewarek", requiredQty: "1 szt." },
+  { id: "c_klucz_planetarny", category: "Asortyment ciągnik", name: "Klucz planetarny", requiredQty: "1 szt." },
+  { id: "c_srubokrety", category: "Asortyment ciągnik", name: "Śrubokręty", requiredQty: "1 kpl." },
+  { id: "c_klucze_plaskie", category: "Asortyment ciągnik", name: "Zestaw kluczy płasko oczkowych", requiredQty: "1 kpl." },
+  { id: "c_torxy", category: "Asortyment ciągnik", name: "Torxy", requiredQty: "1 kpl." },
+  { id: "c_kombinerki", category: "Asortyment ciągnik", name: "Kombinerki", requiredQty: "1 szt." },
+  { id: "c_miara", category: "Asortyment ciągnik", name: "Miara", requiredQty: "1 szt." },
+  { id: "c_skrzynka", category: "Asortyment ciągnik", name: "Skrzynka do narzędzi", requiredQty: "1 szt." },
+  { id: "c_okulary", category: "Asortyment ciągnik", name: "Okulary bhp", requiredQty: "1 szt." },
+  { id: "c_kask", category: "Asortyment ciągnik", name: "Kask", requiredQty: "1 szt." },
+  { id: "c_noz", category: "Asortyment ciągnik", name: "Nóż", requiredQty: "1 szt." },
+  { id: "c_gasnica", category: "Asortyment ciągnik", name: "Gaśnica", requiredQty: "1 szt." },
+  { id: "c_mlotek", category: "Asortyment ciągnik", name: "Młotek", requiredQty: "1 szt." },
+
+  // Naczepa asortyment
+  { id: "n_pasy", category: "Naczepa asortyment", name: "Pasy i klamry", requiredQty: "25 szt." },
+  { id: "n_narozniki", category: "Naczepa asortyment", name: "Narożniki", requiredQty: "50 szt." },
+  { id: "n_drabina", category: "Naczepa asortyment", name: "Drabina", requiredQty: "1 szt." },
+  { id: "n_deski", category: "Naczepa asortyment", name: "Deski zabezpieczające ładunek", requiredQty: "3 szt." },
+  { id: "n_tyczka", category: "Naczepa asortyment", name: "Tyczka do otwierania dachu", requiredQty: "1 szt." },
+  { id: "n_maty", category: "Naczepa asortyment", name: "Maty antypoślizgowe", requiredQty: "1 kpl." },
+  { id: "n_kola", category: "Naczepa asortyment", name: "Koła zapasowe", requiredQty: "2 szt." },
+  { id: "n_miotla", category: "Naczepa asortyment", name: "Miotła", requiredQty: "1 szt." },
 ];
 
 const CATEGORIES = Array.from(new Set(EQUIPMENT.map((e) => e.category)));
