@@ -10,12 +10,17 @@ import {
   parseDOT,
   dotAgeYears,
   minTread,
+  suggestDismountFate,
+  REMOVAL_REASONS,
+  TIRE_PURPOSE_LABELS,
   type Tire,
   type TireInspection,
   type TireReading,
   type TireWarehouseItem,
   type TirePositionDef,
   type TireStatus,
+  type RemovalReason,
+  type TirePurpose,
 } from "@/lib/tireUtils";
 import { BarcodeScanner } from "@/components/BarcodeScanner";
 
@@ -402,6 +407,64 @@ function TireDetailPanel({
   // Skaner kodów kreskowych
   const [showScanner, setShowScanner] = useState(false);
 
+  // Zdejmowanie opony (→ magazyn używanych lub złom)
+  const [dismountMode, setDismountMode] = useState(false);
+  const [dismountReason, setDismountReason] = useState<RemovalReason | "">("");
+  const [dismountKm, setDismountKm] = useState("");
+  const [dismountToWarehouse, setDismountToWarehouse] = useState(true);
+  const [dismounting, setDismounting] = useState(false);
+  const [dismountMsg, setDismountMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!dismountReason) return;
+    const suggestion = suggestDismountFate(treadMin, dismountReason);
+    setDismountToWarehouse(suggestion.toWarehouse);
+  }, [dismountReason, treadMin]);
+
+  async function handleDismount() {
+    if (!tire || !dismountReason) { setDismountMsg("Wybierz powód zdjęcia"); return; }
+    setDismounting(true); setDismountMsg(null);
+    try {
+      const purpose: TirePurpose = dismountToWarehouse ? "montaz" : "zlom";
+      const { error: insErr } = await supabase.from("tire_warehouse").insert({
+        brand: tire.brand || "Nieznana",
+        model: tire.model,
+        size: tire.size || "",
+        dot: tire.dot,
+        condition: "uzywana",
+        tread_mm: treadMin,
+        quantity: 1,
+        location: null,
+        price_pln: null,
+        notes: `Zdjęta z ${vehicleReg} / ${positionId}${dismountKm ? `, ${dismountKm} km` : ""}`,
+        source: "zdjęcie",
+        source_vehicle_reg: vehicleReg,
+        source_position: positionId,
+        removed_reason: dismountReason,
+        removed_km: dismountKm ? parseInt(dismountKm) : null,
+        purpose,
+        is_scrap: !dismountToWarehouse,
+      });
+      if (insErr) throw insErr;
+
+      const { error: delErr } = await supabase
+        .from("tires")
+        .delete()
+        .eq("vehicle_reg", vehicleReg)
+        .eq("position", positionId);
+      if (delErr) throw delErr;
+
+      setDismountMode(false);
+      setDismountReason("");
+      setDismountKm("");
+      onReload();
+    } catch (err: unknown) {
+      setDismountMsg(`Błąd: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setDismounting(false);
+    }
+  }
+
   function handleBarcodeResult(text: string) {
     const parsed = parseTireBarcode(text);
     setForm(f => ({
@@ -420,6 +483,7 @@ function TireDetailPanel({
       .from("tire_warehouse")
       .select("*")
       .gt("quantity", 0)
+      .eq("is_scrap", false)
       .order("brand");
     setWarehouseItems(data ?? []);
     setWarehouseLoading(false);
@@ -460,6 +524,10 @@ function TireDetailPanel({
     setMsg(null);
     setShowWarehouse(false);
     setFromWarehouseId(null);
+    setDismountMode(false);
+    setDismountReason("");
+    setDismountKm("");
+    setDismountMsg(null);
   }, [positionId, vehicleReg]);
 
   async function handleSaveTire() {
@@ -541,12 +609,20 @@ function TireDetailPanel({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {tire && !editMode && (
+          {tire && !editMode && !dismountMode && (
             <button
               onClick={() => { setEditMode(true); setMsg(null); }}
               className="text-xs text-slate-400 hover:text-blue-400 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
             >
               ✏️ Edytuj
+            </button>
+          )}
+          {tire && !editMode && !dismountMode && (
+            <button
+              onClick={() => { setDismountMode(true); setDismountMsg(null); }}
+              className="text-xs text-slate-400 hover:text-red-400 px-2 py-1 rounded hover:bg-slate-700 transition-colors"
+            >
+              🔧 Zdejmij
             </button>
           )}
           <button onClick={onClose} className="text-slate-400 hover:text-white p-1 rounded">✕</button>
@@ -715,6 +791,73 @@ function TireDetailPanel({
           ) : (
             <div className="bg-slate-700/30 rounded-lg p-3 text-slate-500 text-sm text-center">
               Brak pomiarów — dodaj inspekcję
+            </div>
+          )}
+
+          {dismountMode && (
+            <div className="bg-slate-700/50 rounded-lg p-3 space-y-3 border border-red-800/40">
+              <div className="text-slate-300 text-xs font-semibold uppercase tracking-wide">
+                Zdejmij oponę z pojazdu
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Powód zdjęcia *</label>
+                <select
+                  value={dismountReason}
+                  onChange={(e) => setDismountReason(e.target.value as RemovalReason)}
+                  className="w-full bg-slate-600 border border-slate-500 rounded px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none"
+                >
+                  <option value="">— wybierz —</option>
+                  {REMOVAL_REASONS.map((r) => (
+                    <option key={r} value={r}>{r}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-slate-400 mb-1">Przebieg zdjęcia [km] (opcjonalnie)</label>
+                <input
+                  type="number"
+                  value={dismountKm}
+                  onChange={(e) => setDismountKm(e.target.value)}
+                  placeholder="np. 512000"
+                  className="w-full bg-slate-600 border border-slate-500 rounded px-2 py-1.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {dismountReason && (
+                <label className="flex items-center gap-2 text-sm text-slate-200 bg-slate-800/60 rounded-lg p-2.5">
+                  <input
+                    type="checkbox"
+                    checked={dismountToWarehouse}
+                    onChange={(e) => setDismountToWarehouse(e.target.checked)}
+                    className="w-4 h-4"
+                  />
+                  <span>
+                    {dismountToWarehouse
+                      ? "Nadaje się do ponownego montażu → trafi do magazynu jako używana"
+                      : "Nie nadaje się do montażu → zostanie oznaczona jako złom"}
+                    {treadMin != null && (
+                      <span className="text-slate-400"> (bieżnik: {treadMin.toFixed(1)} mm)</span>
+                    )}
+                  </span>
+                </label>
+              )}
+
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={handleDismount}
+                  disabled={dismounting || !dismountReason}
+                  className="bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white text-sm font-semibold px-4 py-1.5 rounded-lg transition-colors"
+                >
+                  {dismounting ? "Zapisuję..." : "Potwierdź zdjęcie"}
+                </button>
+                <button
+                  onClick={() => { setDismountMode(false); setDismountReason(""); setDismountMsg(null); }}
+                  className="text-slate-400 hover:text-white text-sm px-3 py-1.5 rounded"
+                >
+                  Anuluj
+                </button>
+                {dismountMsg && <span className="text-xs text-red-400">{dismountMsg}</span>}
+              </div>
             </div>
           )}
         </div>
@@ -1115,7 +1258,7 @@ function WarehouseTab() {
   const [items, setItems] = useState<TireWarehouseItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [form, setForm] = useState({ brand: "", model: "", size: "", dot: "", condition: "nowa", tread_mm: "", quantity: "1", location: "", price_pln: "", notes: "" });
+  const [form, setForm] = useState({ brand: "", model: "", size: "", dot: "", condition: "nowa", purpose: "montaz" as TirePurpose, tread_mm: "", quantity: "1", location: "", price_pln: "", notes: "" });
   const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
@@ -1142,20 +1285,24 @@ function WarehouseTab() {
   useEffect(() => { load(); }, []);
 
   async function handleAdd() {
-    if (!form.brand || !form.size) return;
+    // Rozmiar i ilość wystarczą — marka bywa nieznana dla opon zastanych na placu
+    if (!form.size) return;
     setSaving(true);
     await supabase.from("tire_warehouse").insert({
-      brand: form.brand, model: form.model || null, size: form.size,
+      brand: form.brand || "Nieznana", model: form.model || null, size: form.size,
       dot: form.dot || null, condition: form.condition,
       tread_mm: form.tread_mm ? parseFloat(form.tread_mm) : null,
       quantity: parseInt(form.quantity) || 1,
       location: form.location || null,
       price_pln: form.price_pln ? parseFloat(form.price_pln) : null,
       notes: form.notes || null,
+      source: "plac",
+      purpose: form.purpose,
+      is_scrap: form.purpose === "zlom",
     });
     setSaving(false);
     setShowAdd(false);
-    setForm({ brand: "", model: "", size: "", dot: "", condition: "nowa", tread_mm: "", quantity: "1", location: "", price_pln: "", notes: "" });
+    setForm({ brand: "", model: "", size: "", dot: "", condition: "nowa", purpose: "montaz", tread_mm: "", quantity: "1", location: "", price_pln: "", notes: "" });
     load();
   }
 
@@ -1169,7 +1316,12 @@ function WarehouseTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="text-slate-400 text-sm">
-          {items.reduce((s, i) => s + i.quantity, 0)} opon w magazynie
+          {items.filter(i => !i.is_scrap).reduce((s, i) => s + i.quantity, 0)} opon dostępnych
+          {items.some(i => i.is_scrap) && (
+            <span className="text-red-400">
+              {" "}· {items.filter(i => i.is_scrap).reduce((s, i) => s + i.quantity, 0)} na złom
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1190,7 +1342,7 @@ function WarehouseTab() {
         <div className="bg-slate-700/40 rounded-xl border border-slate-600/50 p-4">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
             {[
-              { label: "Marka *", key: "brand", ph: "np. Michelin" },
+              { label: "Marka", key: "brand", ph: "np. Michelin (jeśli nieznana — zostaw puste)" },
               { label: "Model", key: "model", ph: "np. X MultiWay" },
               { label: "Rozmiar *", key: "size", ph: "315/70 R22.5" },
               { label: "DOT", key: "dot", ph: "np. 1524" },
@@ -1218,7 +1370,16 @@ function WarehouseTab() {
                 <option value="bieznikowana">Bieżnikowana</option>
               </select>
             </div>
-            <button onClick={handleAdd} disabled={saving || !form.brand || !form.size}
+            <div>
+              <label className="block text-xs text-slate-400 mb-1">Przeznaczenie</label>
+              <select value={form.purpose} onChange={e => setForm(f => ({ ...f, purpose: e.target.value as TirePurpose }))}
+                className="bg-slate-700 border border-slate-600 rounded px-2 py-1.5 text-sm text-white">
+                {(Object.keys(TIRE_PURPOSE_LABELS) as TirePurpose[]).map((p) => (
+                  <option key={p} value={p}>{TIRE_PURPOSE_LABELS[p]}</option>
+                ))}
+              </select>
+            </div>
+            <button onClick={handleAdd} disabled={saving || !form.size}
               className="mt-4 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors">
               {saving ? "Zapisuję..." : "Zapisz"}
             </button>
@@ -1245,6 +1406,7 @@ function WarehouseTab() {
                 <th className="pb-2 pr-3">Stan</th>
                 <th className="pb-2 pr-3">Bieżnik</th>
                 <th className="pb-2 pr-3">Szt.</th>
+                <th className="pb-2 pr-3">Pochodzenie</th>
                 <th className="pb-2 pr-3">Lokalizacja</th>
                 <th className="pb-2 pr-3">Cena</th>
                 <th className="pb-2"></th>
@@ -1257,12 +1419,24 @@ function WarehouseTab() {
                   <td className="py-2 pr-3 text-slate-300 font-mono text-xs">{item.size}</td>
                   <td className="py-2 pr-3 text-slate-400 text-xs">{item.dot ? parseDOT(item.dot) : "—"}</td>
                   <td className="py-2 pr-3">
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${item.condition === "nowa" ? "bg-green-800 text-green-200" : item.condition === "bieznikowana" ? "bg-blue-800 text-blue-200" : "bg-slate-600 text-slate-300"}`}>
-                      {item.condition}
-                    </span>
+                    <div className="flex items-center gap-1">
+                      <span className={`text-xs px-1.5 py-0.5 rounded ${item.condition === "nowa" ? "bg-green-800 text-green-200" : item.condition === "bieznikowana" ? "bg-blue-800 text-blue-200" : "bg-slate-600 text-slate-300"}`}>
+                        {item.condition}
+                      </span>
+                      {item.is_scrap && (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-red-900 text-red-200 font-semibold">ZŁOM</span>
+                      )}
+                    </div>
                   </td>
                   <td className="py-2 pr-3 text-slate-300">{item.tread_mm != null ? `${item.tread_mm} mm` : "—"}</td>
                   <td className="py-2 pr-3 text-white font-semibold">{item.quantity}</td>
+                  <td className="py-2 pr-3 text-slate-400 text-xs">
+                    {item.source === "zdjęcie"
+                      ? `🔧 ${item.source_vehicle_reg ?? "?"} / ${item.source_position ?? "?"}${item.removed_reason ? ` (${item.removed_reason})` : ""}`
+                      : item.source === "plac"
+                      ? "🏗️ plac"
+                      : "🛒 zakup"}
+                  </td>
                   <td className="py-2 pr-3 text-slate-400 text-xs">{item.location ?? "—"}</td>
                   <td className="py-2 pr-3 text-slate-300">{item.price_pln != null ? `${item.price_pln.toLocaleString("pl-PL")} PLN` : "—"}</td>
                   <td className="py-2">

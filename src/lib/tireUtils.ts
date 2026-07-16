@@ -49,6 +49,21 @@ export interface TireReading {
   created_at: string;
 }
 
+export type TireSource = "zakup" | "zdjęcie" | "plac";
+export type TirePurpose = "montaz" | "bieznikowanie" | "zlom" | "nieokreslone";
+export type RemovalReason = "zużycie" | "uszkodzenie" | "rotacja" | "wymiana profilaktyczna" | "inne";
+
+export const REMOVAL_REASONS: RemovalReason[] = [
+  "zużycie", "uszkodzenie", "rotacja", "wymiana profilaktyczna", "inne",
+];
+
+export const TIRE_PURPOSE_LABELS: Record<TirePurpose, string> = {
+  montaz:         "Do ponownego montażu",
+  bieznikowanie:  "Do bieżnikowania",
+  zlom:           "Na złom",
+  nieokreslone:   "Nieokreślone — do oceny",
+};
+
 export interface TireWarehouseItem {
   id: string;
   brand: string;
@@ -62,6 +77,31 @@ export interface TireWarehouseItem {
   price_pln: number | null;
   notes: string | null;
   created_at: string;
+  // Pochodzenie (opcjonalne — puste dla starych wpisów sprzed tej funkcji)
+  source: TireSource | null;
+  source_vehicle_reg: string | null;
+  source_position: string | null;
+  removed_reason: RemovalReason | string | null;
+  removed_km: number | null;
+  purpose: TirePurpose | null;
+  is_scrap: boolean;
+}
+
+// ── Sugestia przeznaczenia zdejmowanej opony ──────────────────
+// Bieżnik poniżej progu krytycznego → zawsze złom, niezależnie od powodu.
+// Uszkodzenie (bez dobrego bieżnika) → domyślnie złom (użytkownik może nadpisać).
+// W pozostałych przypadkach → magazyn jako "używana", nadaje się do ponownego montażu.
+export function suggestDismountFate(
+  treadMm: number | null,
+  reason: RemovalReason | string,
+): { toWarehouse: boolean; purpose: TirePurpose } {
+  if (treadMm != null && treadMm < TREAD_CRITICAL_MM) {
+    return { toWarehouse: false, purpose: "zlom" };
+  }
+  if (reason === "uszkodzenie") {
+    return { toWarehouse: false, purpose: "zlom" };
+  }
+  return { toWarehouse: true, purpose: "montaz" };
 }
 
 // ── Definicja pozycji opony ───────────────────────────────────
