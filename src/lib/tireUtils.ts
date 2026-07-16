@@ -108,10 +108,11 @@ export function suggestDismountFate(
 export interface TirePositionDef {
   id: string;        // klucz w bazie, np. "1L", "2LZ", "N1LZ"
   label: string;     // etykieta UI, np. "1L", "2LZ", "1LZ"
-  axle: number;      // 1, 2 lub 3
+  axle: number;      // 1, 2 lub 3; 0 dla pozycji zapasowej (nie jest na osi)
   side: "L" | "P";  // Lewy / Prawy
   twin: "Z" | "W" | null;  // Zewnętrzny / Wewnętrzny / null dla pojedynczych
   isTwin: boolean;
+  isSpare?: boolean;  // opona zapasowa — nie na osi, bez przebiegu montażu
   // SVG layout
   svgX: number;
   svgY: number;
@@ -150,6 +151,9 @@ export const NACZEPA_POSITIONS: TirePositionDef[] = [
   // Oś 3
   { id: "N3L", label: "3L", axle: 3, side: "L", twin: null, isTwin: false, svgX: 8,   svgY: 398, tireW: 30, tireH: 68 },
   { id: "N3P", label: "3P", axle: 3, side: "P", twin: null, isTwin: false, svgX: 262, svgY: 398, tireW: 30, tireH: 68 },
+  // Zapasowe — uchwyt przy przedniej ścianie, między nogami podporowymi a osią 1
+  { id: "NZL", label: "ZL", axle: 0, side: "L", twin: null, isTwin: false, isSpare: true, svgX: 95,  svgY: 130, tireW: 28, tireH: 55 },
+  { id: "NZP", label: "ZP", axle: 0, side: "P", twin: null, isTwin: false, isSpare: true, svgX: 177, svgY: 130, tireW: 28, tireH: 55 },
 ];
 
 // ── Progi statusu ─────────────────────────────────────────────
@@ -234,6 +238,7 @@ export function minTread(r: TireReading): number | null {
 
 // ── Etykieta osi ─────────────────────────────────────────────
 export function axleLabel(axle: number, vehicleType: "ciagnik" | "naczepa"): string {
+  if (axle === 0) return "Zapasowa";
   if (vehicleType === "ciagnik") return axle === 1 ? "Oś 1 — skrętna" : "Oś 2 — napędowa";
   return `Oś ${axle}`;
 }

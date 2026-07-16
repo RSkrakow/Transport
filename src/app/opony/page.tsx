@@ -10,6 +10,7 @@ import {
   parseDOT,
   dotAgeYears,
   minTread,
+  axleLabel,
   suggestDismountFate,
   REMOVAL_REASONS,
   TIRE_PURPOSE_LABELS,
@@ -307,8 +308,9 @@ function TrailerSVG({
               width={pos.tireW} height={pos.tireH}
               rx={4}
               fill={colors.fill}
-              stroke={isSelected ? "#fff" : colors.stroke}
-              strokeWidth={isSelected ? 2.5 : 1.5}
+              stroke={isSelected ? "#fff" : pos.isSpare ? "#f59e0b" : colors.stroke}
+              strokeWidth={isSelected ? 2.5 : pos.isSpare ? 2 : 1.5}
+              strokeDasharray={!isSelected && pos.isSpare ? "3 2" : undefined}
               opacity={0.95}
             />
             {[0.25, 0.5, 0.75].map((frac, i) => (
@@ -700,9 +702,9 @@ function TireDetailPanel({
           {field("Rozmiar *", "size", "text", "315/70 R22.5")}
           <div className="grid grid-cols-2 gap-2">
             {field("DOT (WWRR)", "dot", "text", "np. 1524")}
-            {field("Data montażu", "installed_date", "date")}
+            {field(posDef?.isSpare ? "Data założenia" : "Data montażu", "installed_date", "date")}
           </div>
-          {field("Stan km przy montażu", "installed_km", "number", "np. 450000")}
+          {!posDef?.isSpare && field("Stan km przy montażu", "installed_km", "number", "np. 450000")}
           {field("Uwagi", "notes", "text", "np. bieżnikowana Bandag")}
           <label className="flex items-center gap-2 cursor-pointer">
             <input
@@ -750,9 +752,14 @@ function TireDetailPanel({
               />
             )}
             <Row label="Bieżnikowana" value={tire.is_retreaded ? "Tak" : "Nie"} />
-            {tire.installed_date && <Row label="Zamontowana" value={tire.installed_date} />}
-            {tire.installed_km != null && (
+            {tire.installed_date && (
+              <Row label={posDef?.isSpare ? "Założona do uchwytu" : "Zamontowana"} value={tire.installed_date} />
+            )}
+            {tire.installed_km != null && !posDef?.isSpare && (
               <Row label="Stan km montażu" value={`${tire.installed_km.toLocaleString("pl-PL")} km`} />
+            )}
+            {posDef?.isSpare && (
+              <Row label="Uwaga" value="Opona zapasowa — sprawdzaj ciśnienie i wiek DOT cyklicznie" valueClass="text-amber-400" />
             )}
             {tire.notes && <Row label="Uwagi" value={tire.notes} />}
           </div>
@@ -1046,7 +1053,7 @@ function InspectionForm({
                     {axleHeader && (
                       <tr key={`h-${pos.axle}`} className="bg-slate-700/20">
                         <td colSpan={7} className="py-1 px-2 text-xs text-slate-400 font-semibold">
-                          Oś {pos.axle}{pos.axle === 1 && !isCiagnik ? "" : pos.axle === 1 ? " — skrętna" : pos.axle === 2 && isCiagnik ? " — napędowa" : ""}
+                          {axleLabel(pos.axle, isCiagnik ? "ciagnik" : "naczepa")}
                         </td>
                       </tr>
                     )}
@@ -1674,7 +1681,7 @@ export default function OponyPage() {
                     <div className="flex items-center justify-between mb-3">
                       <div>
                         <div className="font-semibold text-white text-sm">{naczepReg}</div>
-                        <div className="text-slate-400 text-xs">Naczepa 3-osiowa mega — 6 opon</div>
+                        <div className="text-slate-400 text-xs">Naczepa 3-osiowa mega — 6 opon + 2 zapasowe</div>
                       </div>
                       <div className="flex gap-1.5 text-xs">
                         {nsumm.crit > 0 && <span className="bg-red-700 text-white px-2 py-0.5 rounded-full font-bold">{nsumm.crit}✕</span>}
