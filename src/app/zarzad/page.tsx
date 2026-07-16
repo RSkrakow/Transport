@@ -509,7 +509,7 @@ export default function ZarzadPage() {
     setLoad(`kart${idx}`, true);
     setTimeout(() => {
       try {
-        const result = parseKartotekaXLS(buf, 4.25);
+        const result = parseKartotekaXLS(buf, months[idx].plnEurRate || 4.25);
         // Filter entries to matching month if label is set
         const existingLabelK = months[idx].label;
         const isMonthLabelK = /^\d{4}-\d{2}$/.test(existingLabelK);
