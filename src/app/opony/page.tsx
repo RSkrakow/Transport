@@ -638,6 +638,15 @@ function TireDetailPanel({
             {tire ? "Edytuj dane opony" : "Przypisz oponę do pozycji"}
           </div>
 
+          {/* ── Ostrzeżenie: są pomiary, ale brak zarejestrowanej opony ── */}
+          {!tire && reading && (
+            <div className="bg-amber-900/30 border border-amber-700/50 rounded-lg p-2.5 text-xs text-amber-300">
+              ⚠ Ta pozycja ma zapisaną inspekcję
+              {treadMin != null && <> (bieżnik: <strong>{treadMin.toFixed(1)} mm</strong>{status !== "no-data" && `, ${STATUS_COLORS[status].label}`})</>}
+              , ale nie ma zarejestrowanej opony. Uzupełnij dane poniżej, żeby powiązać je z tą pozycją — dopiero wtedy pojawią się opcje Edytuj/Zdejmij.
+            </div>
+          )}
+
           {/* ── Przypisz z magazynu (tylko gdy brak opony) ── */}
           {!tire && (
             <div className="mb-2">
