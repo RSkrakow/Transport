@@ -193,7 +193,14 @@ export default function ChecklistaPage() {
       setMsg({ type: "ok", text: "✓ Zapisano pomyślnie" });
       loadHistory(vehicleReg);
     } catch (e: unknown) {
-      setMsg({ type: "err", text: `Błąd: ${e instanceof Error ? e.message : String(e)}` });
+      // Błąd Supabase to zwykły obiekt {message, details, hint, code} — nie instancja Error
+      const err = e as { message?: string; details?: string; hint?: string; code?: string };
+      const text = e instanceof Error
+        ? e.message
+        : err?.message
+          ? [err.message, err.details, err.hint].filter(Boolean).join(" — ")
+          : JSON.stringify(e);
+      setMsg({ type: "err", text: `Błąd: ${text}` });
     } finally {
       setSaving(false);
     }
