@@ -1,9 +1,6 @@
 "use client";
 
-import {
-  PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend,
-} from "recharts";
-import { profitabilityLabel, type CostBreakdown as CB } from "@/lib/calculator";
+import { type CostBreakdown as CB } from "@/lib/calculator";
 
 interface Props {
   result: CB;
@@ -14,17 +11,12 @@ interface Props {
   saved: boolean;
 }
 
-const COLORS = [
-  "#3b82f6", // fuel
-  "#06b6d4", // adblue
-  "#8b5cf6", // idle
-  "#f59e0b", // toll
-  "#10b981", // driver
-  "#ef4444", // service
-  "#6366f1", // leasing ciągnik
-  "#818cf8", // leasing naczepa
-  "#f43f5e", // insurance
-];
+function profitabilityLabel(marginPct: number) {
+  if (marginPct >= 15) return { label: "Rentowna (Dobra marża)", color: "emerald" };
+  if (marginPct >= 5)  return { label: "Niska marża", color: "amber" };
+  if (marginPct >= 0)  return { label: "Na granicy progu", color: "orange" };
+  return { label: "Deficytowa (Strata)", color: "red" };
+}
 
 const fmt = (n: number) =>
   n.toLocaleString("pl-PL", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
@@ -46,137 +38,75 @@ export default function CostBreakdown({
     { name: "Leasing cią.",   value: result.leasing,        icon: "💳" },
     { name: "Leasing nacz.",  value: result.trailerLeasing, icon: "🚛" },
     { name: "Ubezpieczenie",  value: result.insurance,      icon: "🛡️" },
+    { name: "Koszty ogólne",  value: result.overhead,       icon: "🏛️" },
   ];
 
-  const pieData = costItems.map(i => ({ name: i.name, value: i.value }));
-
   const marginColorClass =
-    color === "emerald" ? "text-emerald-600 bg-emerald-50" :
-    color === "amber"   ? "text-amber-600 bg-amber-50" :
-    color === "orange"  ? "text-orange-600 bg-orange-50" :
-    "text-red-600 bg-red-50";
+    color === "emerald" ? "text-emerald-600 bg-emerald-50 border-emerald-200" :
+    color === "amber"   ? "text-amber-600 bg-amber-50 border-amber-200" :
+    color === "orange"  ? "text-orange-600 bg-orange-50 border-orange-200" :
+    "text-red-600 bg-red-50 border-red-200";
 
   return (
     <div className="space-y-4">
       {/* ── Margin banner ── */}
-      <div className={`rounded-xl p-5 flex items-center justify-between ${marginColorClass}`}>
+      <div className={`rounded-xl p-5 border flex items-center justify-between ${marginColorClass}`}>
         <div>
-          <p className="text-sm font-semibold uppercase tracking-wide opacity-70">{label}</p>
-          <p className="text-3xl font-bold mt-0.5">
-            {result.marginEur >= 0 ? "+" : ""}{fmtEur(result.marginEur)}
-          </p>
-          <p className="text-sm mt-1 opacity-80">
-            marża: {result.marginPct.toFixed(1)}%
-            &nbsp;·&nbsp;
-            min. fracht: {fmtEur(result.minProfitableFreight)}
+          <p className="text-xs font-semibold uppercase tracking-wide opacity-80">{label}</p>
+          <p className="text-3xl font-bold mt-1 font-mono">{fmtEur(result.marginEur)}</p>
+          <p className="text-xs opacity-75 mt-0.5">
+            Marża: <strong className="font-mono">{result.marginPct}%</strong> | Min. fracht: <strong className="font-mono">{fmtEur(result.minProfitableFreight)}</strong>
           </p>
         </div>
-        <div className="text-right text-sm opacity-70">
-          <p>{fmtEur(freightEur)} fracht</p>
-          <p>{fmtEur(result.total)} koszt</p>
-          <p className="mt-1 font-medium">{result.costPerKm.toFixed(2)} EUR/km</p>
+        <button
+          onClick={onSave}
+          disabled={saving || saved}
+          className="bg-white border border-slate-200 shadow-sm px-4 py-2 rounded-lg text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-all disabled:opacity-50"
+        >
+          {saved ? "✓ Zapisano" : saving ? "Zapisywanie..." : "💾 Zapisz kalkulację"}
+        </button>
+      </div>
+
+      {/* ── Summary statistics grid ── */}
+      <div className="grid grid-cols-3 gap-3 text-center">
+        <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+          <p className="text-xs text-slate-400">Koszt / km</p>
+          <p className="text-lg font-bold text-slate-800 font-mono mt-0.5">{result.costPerKm.toFixed(2)} EUR</p>
+        </div>
+        <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+          <p className="text-xs text-slate-400">Przychód / km</p>
+          <p className="text-lg font-bold text-blue-700 font-mono mt-0.5">{result.revenuePerKm.toFixed(2)} EUR</p>
+        </div>
+        <div className="bg-white p-3 rounded-lg border border-slate-100 shadow-sm">
+          <p className="text-xs text-slate-400">Doby trasy</p>
+          <p className="text-lg font-bold text-slate-800 font-mono mt-0.5">{result.routeDays} dni</p>
         </div>
       </div>
 
-      {/* ── Grid: breakdown + chart ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* ── Cost breakdown table ── */}
+      <div className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
+        <h3 className="text-sm font-semibold text-slate-800 flex items-center justify-between">
+          <span>📊 Rozbicie kosztów trasy</span>
+          <span className="text-xs text-slate-400 font-mono">Suma: {fmtEur(result.total)}</span>
+        </h3>
 
-        {/* Cost rows */}
-        <div className="card space-y-2">
-          <h3 className="font-bold text-slate-700 mb-3">Struktura kosztów</h3>
-          {costItems.map((item, i) => {
-            const pct = result.total > 0 ? (item.value / result.total) * 100 : 0;
+        <div className="space-y-2">
+          {costItems.map(item => {
+            const pct = result.total > 0 ? ((item.value / result.total) * 100).toFixed(1) : "0";
             return (
-              <div key={item.name} className="flex items-center gap-2">
-                <span className="text-base w-5">{item.icon}</span>
-                <span className="text-sm text-slate-600 flex-1">{item.name}</span>
+              <div key={item.name} className="flex items-center justify-between text-xs py-1 border-b border-slate-50 last:border-0">
                 <div className="flex items-center gap-2">
-                  <div className="w-20 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{ width: `${pct}%`, backgroundColor: COLORS[i] }}
-                    />
-                  </div>
-                  <span className="text-xs text-slate-400 w-8 text-right">
-                    {pct.toFixed(0)}%
-                  </span>
-                  <span className="text-sm font-semibold text-slate-700 w-20 text-right">
-                    {fmtEur(item.value)}
-                  </span>
+                  <span className="w-3 text-center">{item.icon}</span>
+                  <span className="font-medium text-slate-700">{item.name}</span>
+                </div>
+                <div className="flex items-center gap-4">
+                  <span className="text-slate-400 font-mono text-[11px] w-12 text-right">{pct}%</span>
+                  <span className="font-mono font-semibold text-slate-800 w-20 text-right">{fmtEur(item.value)}</span>
                 </div>
               </div>
             );
           })}
-          <div className="border-t border-slate-200 pt-2 flex justify-between">
-            <span className="font-bold text-slate-800">ŁĄCZNIE</span>
-            <span className="font-bold text-slate-800">{fmtEur(result.total)}</span>
-          </div>
         </div>
-
-        {/* Pie chart */}
-        <div className="card">
-          <h3 className="font-bold text-slate-700 mb-2">Udział kosztów</h3>
-          <ResponsiveContainer width="100%" height={220}>
-            <PieChart>
-              <Pie
-                data={pieData}
-                cx="50%"
-                cy="50%"
-                innerRadius={50}
-                outerRadius={90}
-                paddingAngle={2}
-                dataKey="value"
-              >
-                {pieData.map((_, index) => (
-                  <Cell key={index} fill={COLORS[index % COLORS.length]} />
-                ))}
-              </Pie>
-              <Tooltip
-                formatter={(v: number) => [fmtEur(v), ""]}
-                contentStyle={{ fontSize: "12px" }}
-              />
-              <Legend
-                wrapperStyle={{ fontSize: "11px" }}
-                iconType="circle"
-                iconSize={8}
-              />
-            </PieChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-
-      {/* ── Per-km summary ── */}
-      <div className="card grid grid-cols-3 gap-4 text-center">
-        <div>
-          <p className="text-xs text-slate-500 uppercase font-semibold">Przychód/km</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">
-            {result.revenuePerKm.toFixed(2)} <span className="text-sm font-normal">EUR</span>
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-500 uppercase font-semibold">Koszt/km</p>
-          <p className="text-xl font-bold text-slate-800 mt-1">
-            {result.costPerKm.toFixed(2)} <span className="text-sm font-normal">EUR</span>
-          </p>
-        </div>
-        <div>
-          <p className="text-xs text-slate-500 uppercase font-semibold">Marża/km</p>
-          <p className={`text-xl font-bold mt-1 ${result.marginEur >= 0 ? "text-emerald-600" : "text-red-600"}`}>
-            {(result.revenuePerKm - result.costPerKm).toFixed(2)}{" "}
-            <span className="text-sm font-normal">EUR</span>
-          </p>
-        </div>
-      </div>
-
-      {/* ── Save button ── */}
-      <div className="flex justify-end">
-        <button
-          onClick={onSave}
-          disabled={saving || saved}
-          className="btn-primary"
-        >
-          {saved ? "✓ Zapisano" : saving ? "Zapisuję..." : "Zapisz kalkulację"}
-        </button>
       </div>
     </div>
   );

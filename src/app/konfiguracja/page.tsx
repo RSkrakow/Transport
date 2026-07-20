@@ -88,220 +88,227 @@ function NumberField({
 export default function KonfiguracjaPage() {
   const { settings, loading, save } = useSettings();
   const [local, setLocal] = useState<AppSettings | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saved,  setSaved]  = useState(false);
+  const [saved, setSaved] = useState(false);
 
-  // Use local draft if editing, else live settings
-  const cur = local ?? settings;
+  const current = local ?? settings;
 
-  const set = <K extends keyof AppSettings>(key: K, val: AppSettings[K]) => {
-    setSaved(false);
-    setLocal(prev => ({ ...(prev ?? settings), [key]: val }));
+  const update = (patch: Partial<AppSettings>) => {
+    setLocal(prev => ({ ...(prev ?? settings), ...patch }));
   };
 
   const handleSave = async () => {
     if (!local) return;
-    setSaving(true);
     await save(local);
-    setSaving(false);
     setSaved(true);
-    setLocal(null);
+    setTimeout(() => setSaved(false), 2500);
   };
-
-  const handleReset = () => { setLocal(null); setSaved(false); };
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-48 text-slate-400">
-        <span className="text-sm">Wczytywanie ustawień…</span>
+      <div className="p-8 text-center text-slate-400 text-sm">
+        Ładowanie parametrów...
       </div>
     );
   }
 
-  const isDirty = local !== null;
+  // Obliczenia podglądowe dla kosztów ogólnych
+  const overheadPln = current.overheadMonthlyPln ?? 30000;
+  const rate = current.plnEurRate ?? 4.25;
+  const activeCount = current.activeVehiclesCount ?? 60;
+  const monthlyEur = rate > 0 ? overheadPln / rate : 0;
+  const dailyEurPerTruck = activeCount > 0 ? (monthlyEur / (activeCount * 30)) : 0;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-
+    <div className="max-w-3xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">⚙️ Konfiguracja</h1>
+          <h1 className="text-2xl font-bold text-slate-800">⚙️ Konfiguracja</h1>
           <p className="text-sm text-slate-500 mt-1">
             Globalne parametry kalkulatora — stosowane we wszystkich analizach
           </p>
         </div>
-        <div className="flex gap-2">
-          {isDirty && (
-            <button
-              onClick={handleReset}
-              className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 border border-slate-200 hover:bg-slate-50"
-            >
-              Anuluj
-            </button>
-          )}
-          <button
-            onClick={handleSave}
-            disabled={!isDirty || saving}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-              saved
-                ? "bg-emerald-500 text-white"
-                : isDirty
-                  ? "bg-blue-700 hover:bg-blue-800 text-white"
-                  : "bg-slate-200 text-slate-400 cursor-not-allowed"
-            }`}
-          >
-            {saved ? "✓ Zapisano" : saving ? "Zapisuję…" : "Zapisz zmiany"}
-          </button>
-        </div>
+        <button
+          onClick={handleSave}
+          disabled={!local}
+          className={`px-5 py-2 rounded-lg text-sm font-semibold transition-all ${
+            saved
+              ? "bg-emerald-600 text-white"
+              : local
+              ? "bg-blue-600 hover:bg-blue-700 text-white shadow"
+              : "bg-slate-200 text-slate-400 cursor-not-allowed"
+          }`}
+        >
+          {saved ? "✓ Zapisano!" : "Zapisz zmiany"}
+        </button>
       </div>
 
-      {isDirty && (
-        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-xs text-amber-700">
-          Masz niezapisane zmiany — kliknij <strong>Zapisz zmiany</strong> aby zastosować.
+      {/* ── METODY ALOKACJI ──────────────────────────────────── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">📐</span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">
+              Metody alokacji kosztów stałych
+            </h2>
+            <p className="text-xs text-slate-400">
+              <strong className="text-slate-600">Per dobę</strong> — koszt stały ÷ 30 × dni trasy (rekomendowane dla TIR).<br />
+              <strong className="text-slate-600">Per km</strong> — koszt stały ÷ avg_km/mies. × km trasy.
+            </p>
+          </div>
         </div>
-      )}
 
-      {/* ── Metody alokacji ── */}
-      <div className="card">
-        <div className="flex items-center gap-2 mb-1">
-          <h2 className="font-bold text-slate-800">📐 Metody alokacji kosztów stałych</h2>
-        </div>
-        <p className="text-xs text-slate-400 mb-4">
-          <strong>Per dobę</strong> — koszt stały ÷ 30 × dni trasy (rekomendowane dla TIR, IRU/BGL standard).<br />
-          <strong>Per km</strong> — koszt stały ÷ avg_km/mies. × km trasy (prostsze, ale zaniża koszty przy postojach).
-        </p>
         <MethodToggle
           label="Leasing ciągnika"
           description="Rata leasingowa ciągnika alokowana na trasę"
-          value={cur.leasingMethod}
-          onChange={v => set("leasingMethod", v)}
+          value={current.leasingMethod}
+          onChange={v => update({ leasingMethod: v })}
         />
         <MethodToggle
           label="Leasing naczepy"
           description="Rata leasingowa naczepy alokowana na trasę"
-          value={cur.trailerLeasingMethod}
-          onChange={v => set("trailerLeasingMethod", v)}
+          value={current.trailerLeasingMethod}
+          onChange={v => update({ trailerLeasingMethod: v })}
         />
         <MethodToggle
           label="Ubezpieczenie OC+AC"
           description="Składka ubezpieczeniowa alokowana na trasę"
-          value={cur.insuranceMethod}
-          onChange={v => set("insuranceMethod", v)}
+          value={current.insuranceMethod}
+          onChange={v => update({ insuranceMethod: v })}
         />
       </div>
 
-      {/* ── Stawki flotowe ── */}
-      <div className="card">
-        <h2 className="font-bold text-slate-800 mb-1">⛽ Stawki domyślne flotowe</h2>
-        <p className="text-xs text-slate-400 mb-4">
-          Używane gdy brak danych per-pojazd. Aktualizuj regularnie (cena ON, kurs, spalanie z Trimble).
-        </p>
+      {/* ── KOSZTY OGÓLNE I BANKOWE ────────────────────────────── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">🏛️</span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">
+              Koszty ogólnozakładowe i bankowe
+            </h2>
+            <p className="text-xs text-slate-400">
+              Koszty stałe zarządu, księgowości, prowizji i odsetek bankowych rozliczane po dniu na aktywne ciągniki
+            </p>
+          </div>
+        </div>
+
+        <NumberField
+          label="Koszty ogólne (PLN/miesiąc)"
+          description="Miesięczna kwota kosztów bankowych i zarządczych firmy"
+          value={current.overheadMonthlyPln ?? 30000}
+          unit="PLN/mies."
+          step={1000}
+          onChange={v => update({ overheadMonthlyPln: v })}
+        />
+
+        <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs text-slate-600 flex items-center justify-between">
+          <div>
+            <span className="font-semibold text-slate-800">Alokacja dobowa na pojazd:</span>
+            <span className="ml-2 font-mono text-blue-700 font-bold text-sm">
+              {dailyEurPerTruck.toFixed(2)} EUR / dobę
+            </span>
+            <span className="text-slate-400 ml-1">
+              (~{(dailyEurPerTruck * rate).toFixed(2)} PLN / dobę)
+            </span>
+          </div>
+          <div className="text-right text-slate-400">
+            Dla <strong>{activeCount}</strong> aktywnych aut i kursu <strong>{rate}</strong> PLN/EUR
+          </div>
+        </div>
+      </div>
+
+      {/* ── STAWKI FLOTOWE ───────────────────────────────────── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-2">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">⛽</span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">
+              Stawki domyślne flotowe
+            </h2>
+            <p className="text-xs text-slate-400">
+              Używane gdy brak danych per-pojazd. Aktualizuj regularnie.
+            </p>
+          </div>
+        </div>
+
         <NumberField
           label="Cena ON"
-          description="Domyślna cena oleju napędowego"
-          value={cur.fuelPriceEurL}
+          description="Domyślna cena oleju napędowego netto"
+          value={current.fuelPriceEurL}
           unit="EUR/l"
-          step={0.01}
-          onChange={v => set("fuelPriceEurL", v)}
+          onChange={v => update({ fuelPriceEurL: v })}
         />
         <NumberField
           label="Kurs PLN/EUR"
-          description="Do przeliczania myto PLN→EUR z TMS"
-          value={cur.plnEurRate}
+          description="Do przeliczania faktur i stawek z PLN na EUR"
+          value={current.plnEurRate}
           unit="PLN/EUR"
-          step={0.01}
-          onChange={v => set("plnEurRate", v)}
+          onChange={v => update({ plnEurRate: v })}
         />
         <NumberField
           label="Spalanie flotowe"
-          description="Średnie spalanie floty — aktualizuj z Trimble FMS"
-          value={cur.avgFuelL100 ?? 27.80}
+          description="Średnie spalanie floty — z Trimble FMS"
+          value={current.avgFuelL100}
           unit="l/100km"
           step={0.1}
-          onChange={v => set("avgFuelL100", v)}
+          onChange={v => update({ avgFuelL100: v })}
         />
         <NumberField
           label="Koszt kierowcy"
           description="Koszt netto za dobę pracy (agencja pracy)"
-          value={cur.driverDailyCost ?? 181.95}
+          value={current.driverDailyCost}
           unit="EUR/dobę"
-          step={0.5}
-          onChange={v => set("driverDailyCost", v)}
+          step={1}
+          onChange={v => update({ driverDailyCost: v })}
         />
         <NumberField
           label="AdBlue"
           description="Zużycie AdBlue jako % zużycia ON"
-          value={cur.adblueRatePct ?? 3.5}
+          value={current.adblueRatePct}
           unit="% paliwa"
           step={0.1}
-          onChange={v => set("adblueRatePct", v)}
+          onChange={v => update({ adblueRatePct: v })}
         />
         <NumberField
           label="Bieg jałowy"
           description="Straty paliwa na biegu jałowym (z Trimble FMS)"
-          value={cur.idleFuelPct ?? 2.1}
+          value={current.idleFuelPct}
           unit="% paliwa"
           step={0.1}
-          onChange={v => set("idleFuelPct", v)}
-        />
-        <NumberField
-          label="Średnie km/miesiąc"
-          description="Fallback gdy brak danych pojazdu (140 000 km/rok)"
-          value={cur.avgKmPerMonth ?? 11667}
-          unit="km/mies."
-          step={100}
-          onChange={v => set("avgKmPerMonth", v)}
+          onChange={v => update({ idleFuelPct: v })}
         />
       </div>
 
-      {/* ── Progi rentowności ── */}
-      <div className="card">
-        <h2 className="font-bold text-slate-800 mb-1">📊 Progi rentowności</h2>
-        <p className="text-xs text-slate-400 mb-4">
-          Definiują kolory i etykiety marży w tabelach i raportach.
-        </p>
-        <div className="flex gap-3 mb-4">
-          <div className="flex items-center gap-2 bg-emerald-50 rounded-lg px-3 py-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <span className="text-xs font-semibold text-emerald-700">
-              Rentowna ≥ {cur.marginGoodPct}%
-            </span>
-          </div>
-          <div className="flex items-center gap-2 bg-amber-50 rounded-lg px-3 py-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-            <span className="text-xs font-semibold text-amber-700">
-              Niska marża {cur.marginLowPct}–{cur.marginGoodPct}%
-            </span>
-          </div>
-          <div className="flex items-center gap-2 bg-orange-50 rounded-lg px-3 py-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-orange-400" />
-            <span className="text-xs font-semibold text-orange-700">
-              Próg 0–{cur.marginLowPct}%
-            </span>
-          </div>
-          <div className="flex items-center gap-2 bg-red-50 rounded-lg px-3 py-1.5">
-            <div className="w-2.5 h-2.5 rounded-full bg-red-500" />
-            <span className="text-xs font-semibold text-red-700">Strata &lt; 0%</span>
+      {/* ── PROGI RENTOWNOŚCI ────────────────────────────────── */}
+      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-2">
+        <div className="flex items-center gap-2 mb-2">
+          <span className="text-lg">🎯</span>
+          <div>
+            <h2 className="text-base font-semibold text-slate-800">
+              Progi rentowności
+            </h2>
+            <p className="text-xs text-slate-400">
+              Ustawienia kolorów wskaźników marży w aplikacji.
+            </p>
           </div>
         </div>
+
         <NumberField
-          label="Próg dobrej marży"
-          description="Marża równa lub powyżej → Rentowna (zielona)"
-          value={cur.marginGoodPct ?? 15}
+          label="Próg dobrej marży (%)"
+          description="Marża ≥ tego progu = Rentowna (zielony)"
+          value={current.marginGoodPct}
           unit="%"
           step={1}
-          onChange={v => set("marginGoodPct", v)}
+          onChange={v => update({ marginGoodPct: v })}
         />
         <NumberField
-          label="Próg niskiej marży"
-          description="Marża między tym a dobrym → Niska marża (żółta)"
-          value={cur.marginLowPct ?? 5}
+          label="Próg niskiej marży (%)"
+          description="Marża między niskim a dobrym = Niska marża (żółty)"
+          value={current.marginLowPct}
           unit="%"
           step={1}
-          onChange={v => set("marginLowPct", v)}
+          onChange={v => update({ marginLowPct: v })}
         />
       </div>
-
     </div>
   );
 }
